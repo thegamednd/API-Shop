@@ -2,6 +2,8 @@
 
 RealmForge Shop API - Product catalog and management system for the medieval-themed e-commerce platform.
 
+**Location**: `/Lambdas/API-Shop`
+
 ## Overview
 
 This AWS Lambda function provides a REST API for managing products in the RealmForge Shop. It supports full CRUD operations with advanced querying capabilities through DynamoDB Global Secondary Indexes.
