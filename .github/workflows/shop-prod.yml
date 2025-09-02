@@ -37,9 +37,13 @@ jobs:
           node-version: '22.14.0'
           cache: 'npm'
 
-      - name: Install production dependencies
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build and prepare deployment
         run: |
-          npm ci --omit=dev
+          chmod +x build.sh
+          bash build.sh
 
       - name: Install zip tool
         if: success()
@@ -47,7 +51,9 @@ jobs:
 
       - name: Create Zip file for Lambda function
         if: success()
-        run: zip -r code.zip index.js package.json node_modules/
+        run: |
+          cd dist
+          zip -r ../code.zip *
 
       - name: Update Lambda function code
         if: success()
