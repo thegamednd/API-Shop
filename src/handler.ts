@@ -44,8 +44,8 @@ interface Product {
     ImageURL?: string;
     Stock?: number;
     Tags?: string[];
-    CreatedAt?: string;
-    UpdatedAt?: string;
+    CreatedAt?: number; // Changed to numeric timestamp
+    UpdatedAt?: number; // Changed to numeric timestamp
     [key: string]: any; // Allow additional attributes
 }
 
@@ -283,9 +283,9 @@ async function createProduct(productData: Partial<Product>): Promise<APIGatewayP
             });
         }
         
-        // Generate ID and timestamps
-        const timestamp = new Date().toISOString();
-        const id = `product_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        // Generate ID and numeric timestamps
+        const timestamp = Date.now();
+        const id = `product_${timestamp}_${Math.random().toString(36).substring(2, 11)}`;
         
         const product: Product = {
             ID: id,
@@ -326,8 +326,8 @@ async function updateProduct(id: string, updateData: Record<string, any>): Promi
         delete updateData.ID;
         delete updateData.CreatedAt; // Prevent overwriting creation timestamp
         
-        // Add updated timestamp
-        updateData.UpdatedAt = new Date().toISOString();
+        // Add numeric updated timestamp
+        updateData.UpdatedAt = Date.now();
         
         // Build update expression
         const updateExpression: string[] = [];
