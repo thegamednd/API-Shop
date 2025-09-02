@@ -69,4 +69,4 @@ jobs:
         with:
             args: "lambda update-function-configuration \
                 --function-name arn:aws:lambda:eu-west-2:${{ secrets.PROD_AWS_ACCOUNT }}:function:API-Shop \
-                --environment Variables='{TABLE_NAME=Shop-Products}'"
+                --environment Variables='{TABLE_NAME=Items}'"
