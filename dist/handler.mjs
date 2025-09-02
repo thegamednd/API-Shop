@@ -4,7 +4,7 @@ const client = new DynamoDBClient({
     region: process.env.AWS_REGION || 'eu-west-2'
 });
 const dynamodb = DynamoDBDocumentClient.from(client);
-const TABLE_NAME = process.env.TABLE_NAME || 'Items';
+const TABLE_NAME = process.env.TABLE_NAME || 'Shop';
 const CORS_HEADERS = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
@@ -91,12 +91,7 @@ async function getProduct(id) {
 async function getAllProducts(queryParams) {
     try {
         const params = {
-            TableName: TABLE_NAME,
-            FilterExpression: 'attribute_not_exists(OwnerID) OR OwnerID = :null OR ShopVisible = :true',
-            ExpressionAttributeValues: {
-                ':null': null,
-                ':true': true
-            }
+            TableName: TABLE_NAME
         };
         if (queryParams.lastKey) {
             params.ExclusiveStartKey = JSON.parse(decodeURIComponent(queryParams.lastKey));

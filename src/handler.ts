@@ -23,7 +23,7 @@ const client = new DynamoDBClient({
 
 const dynamodb = DynamoDBDocumentClient.from(client);
 
-const TABLE_NAME = process.env.TABLE_NAME || 'Items';
+const TABLE_NAME = process.env.TABLE_NAME || 'Shop';
 
 // CORS headers
 const CORS_HEADERS = {
@@ -139,17 +139,11 @@ async function getProduct(id: string): Promise<APIGatewayProxyResult> {
     }
 }
 
-// Get all items available in shop (items without owner or marked as shop items)
+// Get all products from Shop table
 async function getAllProducts(queryParams: Record<string, string | undefined>): Promise<APIGatewayProxyResult> {
     try {
         const params: ScanCommandInput = {
-            TableName: TABLE_NAME,
-            // Filter for shop items - either no OwnerID or explicitly marked for shop
-            FilterExpression: 'attribute_not_exists(OwnerID) OR OwnerID = :null OR ShopVisible = :true',
-            ExpressionAttributeValues: {
-                ':null': null,
-                ':true': true
-            }
+            TableName: TABLE_NAME
         };
         
         // Add pagination if provided
