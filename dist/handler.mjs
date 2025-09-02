@@ -201,7 +201,7 @@ async function createProduct(productData) {
                 required: ['Name', 'Category', 'Price']
             });
         }
-        const timestamp = Date.now();
+        const timestamp = Math.floor(Date.now() / 1000);
         const id = `product_${timestamp}_${Math.random().toString(36).substring(2, 11)}`;
         const product = {
             ID: id,
@@ -236,7 +236,7 @@ async function updateProduct(id, updateData) {
     try {
         delete updateData.ID;
         delete updateData.CreatedAt;
-        updateData.UpdatedAt = Date.now();
+        updateData.UpdatedAt = Math.floor(Date.now() / 1000);
         const updateExpression = [];
         const expressionAttributeNames = {};
         const expressionAttributeValues = {};

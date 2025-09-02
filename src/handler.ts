@@ -283,8 +283,8 @@ async function createProduct(productData: Partial<Product>): Promise<APIGatewayP
             });
         }
         
-        // Generate ID and numeric timestamps
-        const timestamp = Date.now();
+        // Generate ID and Unix timestamp (seconds)
+        const timestamp = Math.floor(Date.now() / 1000);
         const id = `product_${timestamp}_${Math.random().toString(36).substring(2, 11)}`;
         
         const product: Product = {
@@ -326,8 +326,8 @@ async function updateProduct(id: string, updateData: Record<string, any>): Promi
         delete updateData.ID;
         delete updateData.CreatedAt; // Prevent overwriting creation timestamp
         
-        // Add numeric updated timestamp
-        updateData.UpdatedAt = Date.now();
+        // Add Unix timestamp (seconds) for updated time
+        updateData.UpdatedAt = Math.floor(Date.now() / 1000);
         
         // Build update expression
         const updateExpression: string[] = [];
