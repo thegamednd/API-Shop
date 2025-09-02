@@ -1,0 +1,80 @@
+{
+  "TableName": "Shop-Products",
+  "BillingMode": "PAY_PER_REQUEST",
+  "AttributeDefinitions": [
+    {
+      "AttributeName": "ID",
+      "AttributeType": "S"
+    },
+    {
+      "AttributeName": "Category",
+      "AttributeType": "S"
+    },
+    {
+      "AttributeName": "CreatedAt",
+      "AttributeType": "S"
+    },
+    {
+      "AttributeName": "Status",
+      "AttributeType": "S"
+    },
+    {
+      "AttributeName": "Price",
+      "AttributeType": "N"
+    }
+  ],
+  "KeySchema": [
+    {
+      "AttributeName": "ID",
+      "KeyType": "HASH"
+    }
+  ],
+  "GlobalSecondaryIndexes": [
+    {
+      "IndexName": "Category-CreatedAt-index",
+      "KeySchema": [
+        {
+          "AttributeName": "Category",
+          "KeyType": "HASH"
+        },
+        {
+          "AttributeName": "CreatedAt",
+          "KeyType": "RANGE"
+        }
+      ],
+      "Projection": {
+        "ProjectionType": "ALL"
+      }
+    },
+    {
+      "IndexName": "Status-Price-index",
+      "KeySchema": [
+        {
+          "AttributeName": "Status",
+          "KeyType": "HASH"
+        },
+        {
+          "AttributeName": "Price",
+          "KeyType": "RANGE"
+        }
+      ],
+      "Projection": {
+        "ProjectionType": "ALL"
+      }
+    }
+  ],
+  "Tags": [
+    {
+      "Key": "Project",
+      "Value": "RealmForge"
+    },
+    {
+      "Key": "Service",
+      "Value": "Shop"
+    },
+    {
+      "Key": "Environment",
+      "Value": "Development"
+    }
+  ]
+}

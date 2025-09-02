@@ -1,0 +1,22 @@
+{
+  "name": "api-shop",
+  "version": "1.0.0",
+  "description": "RealmForge Shop API - Product catalog and management",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "deploy": "zip -r api-shop.zip . -x '*.git*' 'node_modules/.cache/*' && aws lambda update-function-code --function-name api-shop --zip-file fileb://api-shop.zip"
+  },
+  "keywords": [
+    "realmforge",
+    "shop",
+    "api",
+    "lambda",
+    "dynamodb"
+  ],
+  "author": "RealmForge",
+  "license": "MIT",
+  "dependencies": {
+    "aws-sdk": "^2.1691.0"
+  }
+}
