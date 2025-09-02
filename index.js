@@ -1,9 +1,12 @@
-const AWS = require('aws-sdk');
+const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
+const { DynamoDBDocumentClient, GetCommand, PutCommand, UpdateCommand, DeleteCommand, ScanCommand, QueryCommand } = require('@aws-sdk/lib-dynamodb');
 
-// Configure AWS SDK
-const dynamodb = new AWS.DynamoDB.DocumentClient({
+// Configure AWS SDK v3
+const client = new DynamoDBClient({
     region: process.env.AWS_REGION || 'eu-west-2'
 });
+
+const dynamodb = DynamoDBDocumentClient.from(client);
 
 const TABLE_NAME = process.env.TABLE_NAME || 'Shop-Products';
 
@@ -89,12 +92,12 @@ exports.handler = async (event) => {
 // Get single product by ID
 async function getProduct(id) {
     try {
-        const params = {
+        const command = new GetCommand({
             TableName: TABLE_NAME,
             Key: { ID: id }
-        };
+        });
         
-        const result = await dynamodb.get(params).promise();
+        const result = await dynamodb.send(command);
         
         if (!result.Item) {
             return response(404, { error: 'Product not found' });
@@ -122,7 +125,8 @@ async function getAllProducts(queryParams) {
             params.Limit = parseInt(queryParams.limit);
         }
         
-        const result = await dynamodb.scan(params).promise();
+        const command = new ScanCommand(params);
+        const result = await dynamodb.send(command);
         
         const responseBody = {
             products: result.Items,
@@ -161,7 +165,8 @@ async function getProductsByCategory(category, queryParams) {
             params.Limit = parseInt(queryParams.limit);
         }
         
-        const result = await dynamodb.query(params).promise();
+        const command = new QueryCommand(params);
+        const result = await dynamodb.send(command);
         
         const responseBody = {
             products: result.Items,
@@ -220,7 +225,8 @@ async function getProductsByStatus(status, queryParams) {
             params.FilterExpression = filterExpression;
         }
         
-        const result = await dynamodb.query(params).promise();
+        const command = new QueryCommand(params);
+        const result = await dynamodb.send(command);
         
         const responseBody = {
             products: result.Items,
@@ -268,17 +274,17 @@ async function createProduct(productData) {
             ...productData.additionalAttributes
         };
         
-        const params = {
+        const command = new PutCommand({
             TableName: TABLE_NAME,
             Item: product,
             ConditionExpression: 'attribute_not_exists(ID)'
-        };
+        });
         
-        await dynamodb.put(params).promise();
+        await dynamodb.send(command);
         
         return response(201, product);
     } catch (error) {
-        if (error.code === 'ConditionalCheckFailedException') {
+        if (error.name === 'ConditionalCheckFailedException') {
             return response(409, { error: 'Product already exists' });
         }
         return handleError(error, 'createProduct');
@@ -306,7 +312,7 @@ async function updateProduct(id, updateData) {
             expressionAttributeValues[`:${key}`] = updateData[key];
         });
         
-        const params = {
+        const command = new UpdateCommand({
             TableName: TABLE_NAME,
             Key: { ID: id },
             UpdateExpression: `SET ${updateExpression.join(', ')}`,
@@ -314,13 +320,13 @@ async function updateProduct(id, updateData) {
             ExpressionAttributeValues: expressionAttributeValues,
             ConditionExpression: 'attribute_exists(ID)',
             ReturnValues: 'ALL_NEW'
-        };
+        });
         
-        const result = await dynamodb.update(params).promise();
+        const result = await dynamodb.send(command);
         
         return response(200, result.Attributes);
     } catch (error) {
-        if (error.code === 'ConditionalCheckFailedException') {
+        if (error.name === 'ConditionalCheckFailedException') {
             return response(404, { error: 'Product not found' });
         }
         return handleError(error, 'updateProduct');
@@ -330,14 +336,14 @@ async function updateProduct(id, updateData) {
 // Delete product
 async function deleteProduct(id) {
     try {
-        const params = {
+        const command = new DeleteCommand({
             TableName: TABLE_NAME,
             Key: { ID: id },
             ConditionExpression: 'attribute_exists(ID)',
             ReturnValues: 'ALL_OLD'
-        };
+        });
         
-        const result = await dynamodb.delete(params).promise();
+        const result = await dynamodb.send(command);
         
         if (!result.Attributes) {
             return response(404, { error: 'Product not found' });
@@ -348,7 +354,7 @@ async function deleteProduct(id) {
             deletedProduct: result.Attributes
         });
     } catch (error) {
-        if (error.code === 'ConditionalCheckFailedException') {
+        if (error.name === 'ConditionalCheckFailedException') {
             return response(404, { error: 'Product not found' });
         }
         return handleError(error, 'deleteProduct');
