@@ -1,31 +1,9 @@
 {
   "name": "api-shop",
   "version": "1.0.0",
-  "description": "RealmForge Shop API - Product catalog and management",
-  "main": "dist/index.mjs",
   "type": "module",
-  "scripts": {
-    "clean": "rm -rf dist",
-    "build": "bash build.sh",
-    "package": "npm run build && cd dist && tar -czf ../deployment.tar.gz .",
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "keywords": [
-    "realmforge",
-    "shop",
-    "api",
-    "lambda",
-    "dynamodb"
-  ],
-  "author": "RealmForge",
-  "license": "MIT",
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.879.0",
     "@aws-sdk/lib-dynamodb": "^3.879.0"
-  },
-  "devDependencies": {
-    "@types/aws-lambda": "^8.10.152",
-    "@types/node": "^24.3.0",
-    "typescript": "^5.9.2"
   }
 }

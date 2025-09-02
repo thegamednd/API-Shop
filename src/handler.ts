@@ -72,7 +72,6 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     
     try {
         const method = event.httpMethod;
-        const path = event.path;
         const pathParams = event.pathParameters || {};
         const queryParams = event.queryStringParameters || {};
         const body = event.body ? JSON.parse(event.body) : {};

@@ -28,7 +28,6 @@ export const handler = async (event) => {
     console.log('Event:', JSON.stringify(event, null, 2));
     try {
         const method = event.httpMethod;
-        const path = event.path;
         const pathParams = event.pathParameters || {};
         const queryParams = event.queryStringParameters || {};
         const body = event.body ? JSON.parse(event.body) : {};

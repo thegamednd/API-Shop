@@ -2,7 +2,7 @@
   "name": "api-shop",
   "version": "1.0.0",
   "description": "RealmForge Shop API - Product catalog and management",
-  "main": "dist/index.mjs",
+  "main": "dist/handler.js",
   "type": "module",
   "scripts": {
     "clean": "rm -rf dist",
