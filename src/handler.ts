@@ -1,11 +1,29 @@
-const AWS = require('aws-sdk');
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { 
+    DynamoDBDocumentClient, 
+    GetCommand, 
+    PutCommand, 
+    UpdateCommand, 
+    DeleteCommand, 
+    ScanCommand, 
+    QueryCommand,
+    GetCommandInput,
+    PutCommandInput,
+    UpdateCommandInput,
+    DeleteCommandInput,
+    ScanCommandInput,
+    QueryCommandInput
+} from '@aws-sdk/lib-dynamodb';
+import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 
-// Configure AWS SDK
-const dynamodb = new AWS.DynamoDB.DocumentClient({
+// Configure AWS SDK v3
+const client = new DynamoDBClient({
     region: process.env.AWS_REGION || 'eu-west-2'
 });
 
-const TABLE_NAME = process.env.TABLE_NAME || 'Shop-Products';
+const dynamodb = DynamoDBDocumentClient.from(client);
+
+const TABLE_NAME = process.env.TABLE_NAME || 'Shop';
 
 // CORS headers
 const CORS_HEADERS = {
@@ -15,15 +33,31 @@ const CORS_HEADERS = {
     'Content-Type': 'application/json'
 };
 
+// Product interface
+interface Product {
+    ID: string;
+    Name: string;
+    Category: string;
+    Price: number;
+    Status?: string;
+    Description?: string;
+    ImageURL?: string;
+    Stock?: number;
+    Tags?: string[];
+    CreatedAt?: number; // Changed to numeric timestamp
+    UpdatedAt?: number; // Changed to numeric timestamp
+    [key: string]: any; // Allow additional attributes
+}
+
 // Response helper
-const response = (statusCode, body) => ({
+const response = (statusCode: number, body: any): APIGatewayProxyResult => ({
     statusCode,
     headers: CORS_HEADERS,
     body: JSON.stringify(body)
 });
 
 // Error handler
-const handleError = (error, operation) => {
+const handleError = (error: any, operation: string): APIGatewayProxyResult => {
     console.error(`Error in ${operation}:`, error);
     return response(500, {
         error: 'Internal Server Error',
@@ -33,12 +67,11 @@ const handleError = (error, operation) => {
 };
 
 // Main Lambda handler
-exports.handler = async (event) => {
+export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
     console.log('Event:', JSON.stringify(event, null, 2));
     
     try {
         const method = event.httpMethod;
-        const path = event.path;
         const pathParams = event.pathParameters || {};
         const queryParams = event.queryStringParameters || {};
         const body = event.body ? JSON.parse(event.body) : {};
@@ -87,14 +120,14 @@ exports.handler = async (event) => {
 };
 
 // Get single product by ID
-async function getProduct(id) {
+async function getProduct(id: string): Promise<APIGatewayProxyResult> {
     try {
-        const params = {
+        const params: GetCommandInput = {
             TableName: TABLE_NAME,
             Key: { ID: id }
         };
         
-        const result = await dynamodb.get(params).promise();
+        const result = await dynamodb.send(new GetCommand(params));
         
         if (!result.Item) {
             return response(404, { error: 'Product not found' });
@@ -106,10 +139,10 @@ async function getProduct(id) {
     }
 }
 
-// Get all products with optional pagination
-async function getAllProducts(queryParams) {
+// Get all products from Shop table
+async function getAllProducts(queryParams: Record<string, string | undefined>): Promise<APIGatewayProxyResult> {
     try {
-        const params = {
+        const params: ScanCommandInput = {
             TableName: TABLE_NAME
         };
         
@@ -122,11 +155,11 @@ async function getAllProducts(queryParams) {
             params.Limit = parseInt(queryParams.limit);
         }
         
-        const result = await dynamodb.scan(params).promise();
+        const result = await dynamodb.send(new ScanCommand(params));
         
-        const responseBody = {
-            products: result.Items,
-            count: result.Items.length
+        const responseBody: any = {
+            products: result.Items || [],
+            count: result.Items?.length || 0
         };
         
         if (result.LastEvaluatedKey) {
@@ -140,9 +173,9 @@ async function getAllProducts(queryParams) {
 }
 
 // Get products by category using GSI
-async function getProductsByCategory(category, queryParams) {
+async function getProductsByCategory(category: string, queryParams: Record<string, string | undefined>): Promise<APIGatewayProxyResult> {
     try {
-        const params = {
+        const params: QueryCommandInput = {
             TableName: TABLE_NAME,
             IndexName: 'Category-CreatedAt-index',
             KeyConditionExpression: 'Category = :category',
@@ -161,11 +194,11 @@ async function getProductsByCategory(category, queryParams) {
             params.Limit = parseInt(queryParams.limit);
         }
         
-        const result = await dynamodb.query(params).promise();
+        const result = await dynamodb.send(new QueryCommand(params));
         
-        const responseBody = {
-            products: result.Items,
-            count: result.Items.length,
+        const responseBody: any = {
+            products: result.Items || [],
+            count: result.Items?.length || 0,
             category: category
         };
         
@@ -180,16 +213,16 @@ async function getProductsByCategory(category, queryParams) {
 }
 
 // Get products by status using GSI
-async function getProductsByStatus(status, queryParams) {
+async function getProductsByStatus(status: string, queryParams: Record<string, string | undefined>): Promise<APIGatewayProxyResult> {
     try {
-        const params = {
+        const params: QueryCommandInput = {
             TableName: TABLE_NAME,
-            IndexName: 'Status-Price-index',
+            IndexName: 'Status-small-index',
             KeyConditionExpression: 'Status = :status',
             ExpressionAttributeValues: {
                 ':status': status
-            },
-            ScanIndexForward: true // Sort by Price ascending (cheapest first)
+            }
+            // Note: No ScanIndexForward as Status-small-index has no sort key
         };
         
         // Add pagination if provided
@@ -204,7 +237,7 @@ async function getProductsByStatus(status, queryParams) {
         // Add price range filtering if provided
         if (queryParams.minPrice || queryParams.maxPrice) {
             let filterExpression = '';
-            const expressionAttributeValues = params.ExpressionAttributeValues;
+            const expressionAttributeValues = params.ExpressionAttributeValues || {};
             
             if (queryParams.minPrice) {
                 filterExpression += 'Price >= :minPrice';
@@ -218,13 +251,14 @@ async function getProductsByStatus(status, queryParams) {
             }
             
             params.FilterExpression = filterExpression;
+            params.ExpressionAttributeValues = expressionAttributeValues;
         }
         
-        const result = await dynamodb.query(params).promise();
+        const result = await dynamodb.send(new QueryCommand(params));
         
-        const responseBody = {
-            products: result.Items,
-            count: result.Items.length,
+        const responseBody: any = {
+            products: result.Items || [],
+            count: result.Items?.length || 0,
             status: status
         };
         
@@ -239,7 +273,7 @@ async function getProductsByStatus(status, queryParams) {
 }
 
 // Create new product
-async function createProduct(productData) {
+async function createProduct(productData: Partial<Product>): Promise<APIGatewayProxyResult> {
     try {
         // Validate required fields
         if (!productData.Name || !productData.Category || !productData.Price) {
@@ -249,15 +283,15 @@ async function createProduct(productData) {
             });
         }
         
-        // Generate ID and timestamps
-        const timestamp = new Date().toISOString();
-        const id = `product_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        // Generate ID and Unix timestamp (seconds)
+        const timestamp = Math.floor(Date.now() / 1000);
+        const id = `product_${timestamp}_${Math.random().toString(36).substring(2, 11)}`;
         
-        const product = {
+        const product: Product = {
             ID: id,
             Name: productData.Name,
             Category: productData.Category,
-            Price: parseFloat(productData.Price),
+            Price: parseFloat(productData.Price.toString()),
             Status: productData.Status || 'active',
             Description: productData.Description || '',
             ImageURL: productData.ImageURL || '',
@@ -265,20 +299,20 @@ async function createProduct(productData) {
             Tags: productData.Tags || [],
             CreatedAt: timestamp,
             UpdatedAt: timestamp,
-            ...productData.additionalAttributes
+            ...productData
         };
         
-        const params = {
+        const params: PutCommandInput = {
             TableName: TABLE_NAME,
             Item: product,
             ConditionExpression: 'attribute_not_exists(ID)'
         };
         
-        await dynamodb.put(params).promise();
+        await dynamodb.send(new PutCommand(params));
         
         return response(201, product);
-    } catch (error) {
-        if (error.code === 'ConditionalCheckFailedException') {
+    } catch (error: any) {
+        if (error.name === 'ConditionalCheckFailedException') {
             return response(409, { error: 'Product already exists' });
         }
         return handleError(error, 'createProduct');
@@ -286,19 +320,19 @@ async function createProduct(productData) {
 }
 
 // Update existing product
-async function updateProduct(id, updateData) {
+async function updateProduct(id: string, updateData: Record<string, any>): Promise<APIGatewayProxyResult> {
     try {
         // Remove ID from update data if present
         delete updateData.ID;
         delete updateData.CreatedAt; // Prevent overwriting creation timestamp
         
-        // Add updated timestamp
-        updateData.UpdatedAt = new Date().toISOString();
+        // Add Unix timestamp (seconds) for updated time
+        updateData.UpdatedAt = Math.floor(Date.now() / 1000);
         
         // Build update expression
-        const updateExpression = [];
-        const expressionAttributeNames = {};
-        const expressionAttributeValues = {};
+        const updateExpression: string[] = [];
+        const expressionAttributeNames: Record<string, string> = {};
+        const expressionAttributeValues: Record<string, any> = {};
         
         Object.keys(updateData).forEach(key => {
             updateExpression.push(`#${key} = :${key}`);
@@ -306,7 +340,7 @@ async function updateProduct(id, updateData) {
             expressionAttributeValues[`:${key}`] = updateData[key];
         });
         
-        const params = {
+        const params: UpdateCommandInput = {
             TableName: TABLE_NAME,
             Key: { ID: id },
             UpdateExpression: `SET ${updateExpression.join(', ')}`,
@@ -316,11 +350,11 @@ async function updateProduct(id, updateData) {
             ReturnValues: 'ALL_NEW'
         };
         
-        const result = await dynamodb.update(params).promise();
+        const result = await dynamodb.send(new UpdateCommand(params));
         
         return response(200, result.Attributes);
-    } catch (error) {
-        if (error.code === 'ConditionalCheckFailedException') {
+    } catch (error: any) {
+        if (error.name === 'ConditionalCheckFailedException') {
             return response(404, { error: 'Product not found' });
         }
         return handleError(error, 'updateProduct');
@@ -328,16 +362,16 @@ async function updateProduct(id, updateData) {
 }
 
 // Delete product
-async function deleteProduct(id) {
+async function deleteProduct(id: string): Promise<APIGatewayProxyResult> {
     try {
-        const params = {
+        const params: DeleteCommandInput = {
             TableName: TABLE_NAME,
             Key: { ID: id },
             ConditionExpression: 'attribute_exists(ID)',
             ReturnValues: 'ALL_OLD'
         };
         
-        const result = await dynamodb.delete(params).promise();
+        const result = await dynamodb.send(new DeleteCommand(params));
         
         if (!result.Attributes) {
             return response(404, { error: 'Product not found' });
@@ -347,8 +381,8 @@ async function deleteProduct(id) {
             message: 'Product deleted successfully',
             deletedProduct: result.Attributes
         });
-    } catch (error) {
-        if (error.code === 'ConditionalCheckFailedException') {
+    } catch (error: any) {
+        if (error.name === 'ConditionalCheckFailedException') {
             return response(404, { error: 'Product not found' });
         }
         return handleError(error, 'deleteProduct');
