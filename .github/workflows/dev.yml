@@ -60,7 +60,7 @@ jobs:
         uses: imehedi/actions-awscli-v2@latest
         with:
             args: "lambda update-function-code \
-                --function-name arn:aws:lambda:eu-west-2:${{ secrets.DEV_AWS_ACCOUNT }}:function:API-Contents \
+                --function-name arn:aws:lambda:eu-west-2:${{ secrets.DEV_AWS_ACCOUNT }}:function:API-Shop \
                 --zip-file fileb://code.zip"
 
       - name: Update Lambda environment variables
