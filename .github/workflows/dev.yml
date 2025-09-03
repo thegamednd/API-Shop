@@ -69,4 +69,4 @@ jobs:
         with:
             args: "lambda update-function-configuration \
                 --function-name arn:aws:lambda:eu-west-2:${{ secrets.DEV_AWS_ACCOUNT }}:function:API-Shop \
-                --environment Variables='{S3_BUCKET_NAME=dev-realmforge-shop}'"
+                --environment Variables='{TABLE_NAME=Shop}'"
