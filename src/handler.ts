@@ -217,12 +217,12 @@ async function getProductsByStatus(status: string, queryParams: Record<string, s
     try {
         const params: QueryCommandInput = {
             TableName: TABLE_NAME,
-            IndexName: 'Status-Price-index',
+            IndexName: 'Status-small-index',
             KeyConditionExpression: 'Status = :status',
             ExpressionAttributeValues: {
                 ':status': status
-            },
-            ScanIndexForward: true // Sort by Price ascending (cheapest first)
+            }
+            // Note: No ScanIndexForward as Status-small-index has no sort key
         };
         
         // Add pagination if provided

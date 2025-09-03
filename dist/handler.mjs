@@ -149,12 +149,11 @@ async function getProductsByStatus(status, queryParams) {
     try {
         const params = {
             TableName: TABLE_NAME,
-            IndexName: 'Status-Price-index',
+            IndexName: 'Status-small-index',
             KeyConditionExpression: 'Status = :status',
             ExpressionAttributeValues: {
                 ':status': status
-            },
-            ScanIndexForward: true
+            }
         };
         if (queryParams.lastKey) {
             params.ExclusiveStartKey = JSON.parse(decodeURIComponent(queryParams.lastKey));
