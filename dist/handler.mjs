@@ -1,5 +1,5 @@
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, GetCommand, PutCommand, UpdateCommand, DeleteCommand, ScanCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, GetCommand, PutCommand, UpdateCommand, DeleteCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
 const client = new DynamoDBClient({
     region: process.env.AWS_REGION || 'eu-west-2'
 });
@@ -46,7 +46,7 @@ export const handler = async (event) => {
                     return await getProductsByStatus(queryParams.status, queryParams);
                 }
                 else {
-                    return await getAllProducts(queryParams);
+                    return await getProductsByStatus('active', queryParams);
                 }
             case 'POST':
                 return await createProduct(body);
@@ -86,31 +86,6 @@ async function getProduct(id) {
     }
     catch (error) {
         return handleError(error, 'getProduct');
-    }
-}
-async function getAllProducts(queryParams) {
-    try {
-        const params = {
-            TableName: TABLE_NAME
-        };
-        if (queryParams.lastKey) {
-            params.ExclusiveStartKey = JSON.parse(decodeURIComponent(queryParams.lastKey));
-        }
-        if (queryParams.limit) {
-            params.Limit = parseInt(queryParams.limit);
-        }
-        const result = await dynamodb.send(new ScanCommand(params));
-        const responseBody = {
-            products: result.Items || [],
-            count: result.Items?.length || 0
-        };
-        if (result.LastEvaluatedKey) {
-            responseBody.lastKey = encodeURIComponent(JSON.stringify(result.LastEvaluatedKey));
-        }
-        return response(200, responseBody);
-    }
-    catch (error) {
-        return handleError(error, 'getAllProducts');
     }
 }
 async function getProductsByCategory(category, queryParams) {
