@@ -46,7 +46,7 @@ export const handler = async (event) => {
                     return await getProductsByStatus(queryParams.status, queryParams);
                 }
                 else {
-                    return await getProductsByStatus('active', queryParams);
+                    return await getProductsByStatus('available', queryParams);
                 }
             case 'POST':
                 return await createProduct(body);
@@ -185,7 +185,7 @@ async function createProduct(productData) {
             Name: productData.Name,
             Category: productData.Category,
             Price: parseFloat(productData.Price.toString()),
-            Status: productData.Status || 'active',
+            Status: productData.Status || 'available',
             Description: productData.Description || '',
             ImageURL: productData.ImageURL || '',
             Stock: productData.Stock || 0,

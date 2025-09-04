@@ -89,8 +89,8 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
                 } else if (queryParams.status) {
                     return await getProductsByStatus(queryParams.status, queryParams);
                 } else {
-                    // Default to getting active products using the efficient Status-small-index GSI
-                    return await getProductsByStatus('active', queryParams);
+                    // Default to getting available products using the efficient Status-small-index GSI
+                    return await getProductsByStatus('available', queryParams);
                 }
                 
             case 'POST':
@@ -262,7 +262,7 @@ async function createProduct(productData: Partial<Product>): Promise<APIGatewayP
             Name: productData.Name,
             Category: productData.Category,
             Price: parseFloat(productData.Price.toString()),
-            Status: productData.Status || 'active',
+            Status: productData.Status || 'available',
             Description: productData.Description || '',
             ImageURL: productData.ImageURL || '',
             Stock: productData.Stock || 0,
