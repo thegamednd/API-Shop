@@ -34,10 +34,17 @@ export const handler = async (event) => {
         if (method === 'OPTIONS') {
             return response(200, {});
         }
+        console.log('Path parameters:', pathParams);
+        console.log('Resource path:', event.resource);
+        console.log('HTTP method:', method);
         switch (method) {
             case 'GET':
-                if (pathParams.id) {
-                    return await getProduct(pathParams.id);
+                if (pathParams.id || pathParams.productId) {
+                    const productId = pathParams.id || pathParams.productId;
+                    if (!productId) {
+                        return response(400, { error: 'Product ID is required' });
+                    }
+                    return await getProduct(productId);
                 }
                 else if (queryParams.category) {
                     return await getProductsByCategory(queryParams.category, queryParams);
