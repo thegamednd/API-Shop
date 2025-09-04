@@ -87,7 +87,7 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
         switch (method) {
             case 'GET':
                 if (pathParams.id || pathParams.productId) {
-                    // Handle both /shop/{id} and /shop/products/{productId} patterns
+                    // Handle both /shop/{id} and /shop/products/product/{id} patterns
                     const productId = pathParams.id || pathParams.productId;
                     if (!productId) {
                         return response(400, { error: 'Product ID is required' });
