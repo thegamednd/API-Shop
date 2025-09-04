@@ -125,7 +125,10 @@ async function getProductsByStatus(status, queryParams) {
         const params = {
             TableName: TABLE_NAME,
             IndexName: 'Status-small-index',
-            KeyConditionExpression: 'Status = :status',
+            KeyConditionExpression: '#status = :status',
+            ExpressionAttributeNames: {
+                '#status': 'Status'
+            },
             ExpressionAttributeValues: {
                 ':status': status
             }

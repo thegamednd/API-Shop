@@ -185,7 +185,10 @@ async function getProductsByStatus(status: string, queryParams: Record<string, s
         const params: QueryCommandInput = {
             TableName: TABLE_NAME,
             IndexName: 'Status-small-index',
-            KeyConditionExpression: 'Status = :status',
+            KeyConditionExpression: '#status = :status',
+            ExpressionAttributeNames: {
+                '#status': 'Status'
+            },
             ExpressionAttributeValues: {
                 ':status': status
             }
