@@ -1,5 +1,5 @@
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, GetCommand, PutCommand, UpdateCommand, DeleteCommand, ScanCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, GetCommand, PutCommand, UpdateCommand, DeleteCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
 const client = new DynamoDBClient({
     region: process.env.AWS_REGION || 'eu-west-2'
 });
@@ -34,10 +34,17 @@ export const handler = async (event) => {
         if (method === 'OPTIONS') {
             return response(200, {});
         }
+        console.log('Path parameters:', pathParams);
+        console.log('Resource path:', event.resource);
+        console.log('HTTP method:', method);
         switch (method) {
             case 'GET':
-                if (pathParams.id) {
-                    return await getProduct(pathParams.id);
+                if (pathParams.id || pathParams.productId) {
+                    const productId = pathParams.id || pathParams.productId;
+                    if (!productId) {
+                        return response(400, { error: 'Product ID is required' });
+                    }
+                    return await getProduct(productId);
                 }
                 else if (queryParams.category) {
                     return await getProductsByCategory(queryParams.category, queryParams);
@@ -46,7 +53,7 @@ export const handler = async (event) => {
                     return await getProductsByStatus(queryParams.status, queryParams);
                 }
                 else {
-                    return await getAllProducts(queryParams);
+                    return await getProductsByStatus('available', queryParams);
                 }
             case 'POST':
                 return await createProduct(body);
@@ -88,31 +95,6 @@ async function getProduct(id) {
         return handleError(error, 'getProduct');
     }
 }
-async function getAllProducts(queryParams) {
-    try {
-        const params = {
-            TableName: TABLE_NAME
-        };
-        if (queryParams.lastKey) {
-            params.ExclusiveStartKey = JSON.parse(decodeURIComponent(queryParams.lastKey));
-        }
-        if (queryParams.limit) {
-            params.Limit = parseInt(queryParams.limit);
-        }
-        const result = await dynamodb.send(new ScanCommand(params));
-        const responseBody = {
-            products: result.Items || [],
-            count: result.Items?.length || 0
-        };
-        if (result.LastEvaluatedKey) {
-            responseBody.lastKey = encodeURIComponent(JSON.stringify(result.LastEvaluatedKey));
-        }
-        return response(200, responseBody);
-    }
-    catch (error) {
-        return handleError(error, 'getAllProducts');
-    }
-}
 async function getProductsByCategory(category, queryParams) {
     try {
         const params = {
@@ -150,7 +132,10 @@ async function getProductsByStatus(status, queryParams) {
         const params = {
             TableName: TABLE_NAME,
             IndexName: 'Status-small-index',
-            KeyConditionExpression: 'Status = :status',
+            KeyConditionExpression: '#status = :status',
+            ExpressionAttributeNames: {
+                '#status': 'Status'
+            },
             ExpressionAttributeValues: {
                 ':status': status
             }
@@ -207,7 +192,7 @@ async function createProduct(productData) {
             Name: productData.Name,
             Category: productData.Category,
             Price: parseFloat(productData.Price.toString()),
-            Status: productData.Status || 'active',
+            Status: productData.Status || 'available',
             Description: productData.Description || '',
             ImageURL: productData.ImageURL || '',
             Stock: productData.Stock || 0,

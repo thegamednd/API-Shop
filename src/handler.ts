@@ -5,13 +5,11 @@ import {
     PutCommand, 
     UpdateCommand, 
     DeleteCommand, 
-    ScanCommand, 
     QueryCommand,
     GetCommandInput,
     PutCommandInput,
     UpdateCommandInput,
     DeleteCommandInput,
-    ScanCommandInput,
     QueryCommandInput
 } from '@aws-sdk/lib-dynamodb';
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
@@ -81,17 +79,27 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
             return response(200, {});
         }
 
+        console.log('Path parameters:', pathParams);
+        console.log('Resource path:', event.resource);
+        console.log('HTTP method:', method);
+
         // Route requests
         switch (method) {
             case 'GET':
-                if (pathParams.id) {
-                    return await getProduct(pathParams.id);
+                if (pathParams.id || pathParams.productId) {
+                    // Handle both /shop/{id} and /shop/products/product/{id} patterns
+                    const productId = pathParams.id || pathParams.productId;
+                    if (!productId) {
+                        return response(400, { error: 'Product ID is required' });
+                    }
+                    return await getProduct(productId);
                 } else if (queryParams.category) {
                     return await getProductsByCategory(queryParams.category, queryParams);
                 } else if (queryParams.status) {
                     return await getProductsByStatus(queryParams.status, queryParams);
                 } else {
-                    return await getAllProducts(queryParams);
+                    // Default to getting available products using the efficient Status-small-index GSI
+                    return await getProductsByStatus('available', queryParams);
                 }
                 
             case 'POST':
@@ -139,38 +147,6 @@ async function getProduct(id: string): Promise<APIGatewayProxyResult> {
     }
 }
 
-// Get all products from Shop table
-async function getAllProducts(queryParams: Record<string, string | undefined>): Promise<APIGatewayProxyResult> {
-    try {
-        const params: ScanCommandInput = {
-            TableName: TABLE_NAME
-        };
-        
-        // Add pagination if provided
-        if (queryParams.lastKey) {
-            params.ExclusiveStartKey = JSON.parse(decodeURIComponent(queryParams.lastKey));
-        }
-        
-        if (queryParams.limit) {
-            params.Limit = parseInt(queryParams.limit);
-        }
-        
-        const result = await dynamodb.send(new ScanCommand(params));
-        
-        const responseBody: any = {
-            products: result.Items || [],
-            count: result.Items?.length || 0
-        };
-        
-        if (result.LastEvaluatedKey) {
-            responseBody.lastKey = encodeURIComponent(JSON.stringify(result.LastEvaluatedKey));
-        }
-        
-        return response(200, responseBody);
-    } catch (error) {
-        return handleError(error, 'getAllProducts');
-    }
-}
 
 // Get products by category using GSI
 async function getProductsByCategory(category: string, queryParams: Record<string, string | undefined>): Promise<APIGatewayProxyResult> {
@@ -218,7 +194,10 @@ async function getProductsByStatus(status: string, queryParams: Record<string, s
         const params: QueryCommandInput = {
             TableName: TABLE_NAME,
             IndexName: 'Status-small-index',
-            KeyConditionExpression: 'Status = :status',
+            KeyConditionExpression: '#status = :status',
+            ExpressionAttributeNames: {
+                '#status': 'Status'
+            },
             ExpressionAttributeValues: {
                 ':status': status
             }
@@ -292,7 +271,7 @@ async function createProduct(productData: Partial<Product>): Promise<APIGatewayP
             Name: productData.Name,
             Category: productData.Category,
             Price: parseFloat(productData.Price.toString()),
-            Status: productData.Status || 'active',
+            Status: productData.Status || 'available',
             Description: productData.Description || '',
             ImageURL: productData.ImageURL || '',
             Stock: productData.Stock || 0,
