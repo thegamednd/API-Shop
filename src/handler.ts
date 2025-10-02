@@ -94,8 +94,10 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
                     }
                     return await getProduct(productId);
                 } else if (queryParams.category) {
+                    // TODO: evaluate if we actually use this
                     return await getProductsByCategory(queryParams.category, queryParams);
                 } else if (queryParams.status) {
+                    // TODO: evaluate if we actually use this
                     return await getProductsByStatus(queryParams.status, queryParams);
                 } else {
                     // Default to getting available products using the efficient Status-small-index GSI
