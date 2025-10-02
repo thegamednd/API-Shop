@@ -46,6 +46,9 @@ jspm_packages/
 *.zip
 api-shop.zip
 
+# Build output
+dist/
+
 # Logs
 logs
 *.log
