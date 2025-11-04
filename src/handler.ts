@@ -29,7 +29,7 @@ const TABLE_NAME = process.env.TABLE_NAME || 'Shop';
 const CORS_HEADERS = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
-    'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
+    'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
     'Content-Type': 'application/json'
 };
 
@@ -66,7 +66,21 @@ const handleError = (error: any, operation: string): APIGatewayProxyResult => {
     });
 };
 
-// Main Lambda handler
+/**
+ * Main Lambda handler for Shop API
+ *
+ * Public Routes:
+ * - GET /shop - Get all active products
+ * - GET /shop/{id} - Get single product by ID
+ *
+ * Admin Routes (requires Administrators group membership):
+ * - GET /admin/shop - Get all products (including archived)
+ * - GET /admin/shop/{id} - Get single product by ID
+ * - POST /admin/shop - Create new product
+ * - PUT /admin/shop/{id} - Update product
+ * - PATCH /admin/shop/{id} - Partial update product
+ * - DELETE /admin/shop/{id} - Delete product
+ */
 export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
     console.log('Event:', JSON.stringify(event, null, 2));
 
@@ -141,6 +155,13 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
                     return await updateProduct(pathParams.id, body);
                 } else {
                     return response(400, { error: 'Product ID is required for updates' });
+                }
+
+            case 'PATCH':
+                if (pathParams.id) {
+                    return await updateProduct(pathParams.id, body);
+                } else {
+                    return response(400, { error: 'Product ID is required for partial updates' });
                 }
 
             case 'DELETE':
