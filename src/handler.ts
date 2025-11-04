@@ -90,13 +90,16 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
         const method = event.httpMethod;
         const pathParams = event.pathParameters || {};
         const queryParams = event.queryStringParameters || {};
-        const body = event.body ? JSON.parse(event.body) : {};
         const path = event.path || event.resource || '';
 
         // Handle OPTIONS for CORS
         if (method === 'OPTIONS') {
             return response(200, {});
         }
+
+        // Check if this is an image upload (multipart/form-data) - don't parse as JSON
+        const isImageUpload = path.includes('/upload-image') || path.includes('upload-image');
+        const body = (!isImageUpload && event.body) ? JSON.parse(event.body) : {};
 
         console.log('Path parameters:', pathParams);
         console.log('Resource path:', event.resource);
