@@ -14,6 +14,16 @@ export async function processImage(imageBuffer: Buffer): Promise<Buffer> {
     try {
         console.log(`Processing image: Input size ${imageBuffer.length} bytes`);
 
+        // Debug: Check first few bytes to validate image format
+        const firstBytes = imageBuffer.slice(0, 10).toString('hex');
+        console.log(`First bytes (hex): ${firstBytes}`);
+
+        // Check for common image signatures
+        const isPNG = imageBuffer[0] === 0x89 && imageBuffer[1] === 0x50;
+        const isJPEG = imageBuffer[0] === 0xFF && imageBuffer[1] === 0xD8;
+        const isGIF = imageBuffer[0] === 0x47 && imageBuffer[1] === 0x49;
+        console.log(`Image format detected - PNG: ${isPNG}, JPEG: ${isJPEG}, GIF: ${isGIF}`);
+
         // Resize image to exact dimensions (cover mode will crop if necessary)
         let processedBuffer = await sharp(imageBuffer)
             .resize(TARGET_WIDTH, TARGET_HEIGHT, {

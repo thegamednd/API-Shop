@@ -84,9 +84,12 @@ export function parseMultipartFormData(event: APIGatewayProxyEvent): Promise<Par
             });
 
             // Decode and write the body to busboy
+            // Use 'binary' encoding to preserve raw bytes when not base64 encoded
             const body = event.isBase64Encoded
                 ? Buffer.from(event.body || '', 'base64')
-                : Buffer.from(event.body || '', 'utf-8');
+                : Buffer.from(event.body || '', 'binary');
+
+            console.log(`Body length: ${body.length} bytes, isBase64Encoded: ${event.isBase64Encoded}`);
 
             busboy.write(body);
             busboy.end();
