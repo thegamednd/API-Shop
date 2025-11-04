@@ -37,8 +37,8 @@ const CORS_HEADERS = {
 interface Product {
     ID: string;
     Name: string;
-    Type: string; // e.g., "GamingSystems"
-    Price: number;
+    Type: string; // e.g., "GamingSystems", "Spells", "Classes", "Rules"
+    Price: number; // Price in cents (CAD) - e.g., 20000 = $200.00 CAD
     GamingSystemID: string;
     Content?: string; // HTML/Markdown description
     Image?: string; // Image URL or key
@@ -387,7 +387,7 @@ async function createProduct(productData: Partial<Product>): Promise<APIGatewayP
             Name: productData.Name,
             Type: productData.Type,
             GamingSystemID: productData.GamingSystemID,
-            Price: parseFloat(productData.Price.toString()),
+            Price: parseInt(productData.Price.toString()), // Price should be in cents (CAD)
             Content: productData.Content || '',
             Image: productData.Image || '',
             IsArchived: productData.IsArchived ?? false,
