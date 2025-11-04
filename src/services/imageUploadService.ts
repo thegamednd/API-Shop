@@ -93,8 +93,8 @@ export async function uploadImageToS3(
             Key: key,
             Body: imageBuffer,
             ContentType: 'image/jpeg',
-            CacheControl: 'public, max-age=31536000', // Cache for 1 year
-            ACL: 'public-read' // Make publicly readable
+            CacheControl: 'public, max-age=31536000' // Cache for 1 year
+            // Note: ACL removed - bucket permissions handle public access
         });
 
         await s3Client.send(command);
