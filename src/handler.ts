@@ -354,6 +354,30 @@ async function createProduct(productData: Partial<Product>): Promise<APIGatewayP
             });
         }
 
+        // Check if GamingSystemID + Type combination already exists
+        const uniqueCheckParams: QueryCommandInput = {
+            TableName: TABLE_NAME,
+            IndexName: 'GamingSystemID-Type-keys-index',
+            KeyConditionExpression: 'GamingSystemID = :gamingSystemId AND #type = :type',
+            ExpressionAttributeNames: {
+                '#type': 'Type'
+            },
+            ExpressionAttributeValues: {
+                ':gamingSystemId': productData.GamingSystemID,
+                ':type': productData.Type
+            },
+            Limit: 1
+        };
+
+        const existingProduct = await dynamodb.send(new QueryCommand(uniqueCheckParams));
+
+        if (existingProduct.Items && existingProduct.Items.length > 0) {
+            return response(409, {
+                error: 'Product with this Gaming System and Type combination already exists',
+                existingProductId: existingProduct.Items[0].ID
+            });
+        }
+
         // Generate ID and ISO 8601 timestamp
         const timestamp = new Date().toISOString();
         const id = productData.ID || `${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
