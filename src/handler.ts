@@ -15,6 +15,8 @@ import {
 } from '@aws-sdk/lib-dynamodb';
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { checkAuthentication } from './services/authService.js';
+import { parseMultipartFormData } from './services/multipartParser.js';
+import { uploadProductImage } from './services/imageUploadService.js';
 
 // Configure AWS SDK v3
 const client = new DynamoDBClient({
@@ -148,6 +150,10 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
                 }
 
             case 'POST':
+                // Check if this is an image upload request
+                if (path.includes('/upload-image') || path.includes('upload-image')) {
+                    return await handleImageUpload(event, isAdminRoute);
+                }
                 return await createProduct(body);
 
             case 'PUT':
@@ -178,6 +184,89 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
         return handleError(error, 'handler');
     }
 };
+
+// Handle image upload
+async function handleImageUpload(event: APIGatewayProxyEvent, isAdminRoute: boolean): Promise<APIGatewayProxyResult> {
+    try {
+        // Only allow admin uploads
+        if (!isAdminRoute) {
+            return response(403, { error: 'Image uploads require administrator access' });
+        }
+
+        console.log('Processing image upload request');
+
+        // Parse multipart form data
+        const formData = await parseMultipartFormData(event);
+
+        // Extract fields
+        const productId = formData.fields.productId;
+        const gamingSystemId = formData.fields.gamingSystemId;
+
+        if (!productId) {
+            return response(400, { error: 'productId is required' });
+        }
+
+        if (!gamingSystemId) {
+            return response(400, { error: 'gamingSystemId is required' });
+        }
+
+        // Check if image file was provided
+        if (formData.files.length === 0) {
+            return response(400, { error: 'No image file provided' });
+        }
+
+        const imageFile = formData.files[0];
+
+        // Validate image type
+        if (!imageFile.mimeType.startsWith('image/')) {
+            return response(400, { error: 'File must be an image' });
+        }
+
+        console.log(`Uploading image for product ${productId} in gaming system ${gamingSystemId}`);
+
+        // Determine environment
+        // STAGE = 'dev' for dev environment, undefined for prod environment
+        const stage = process.env.STAGE || 'prod';
+        const environment: 'dev' | 'prod' = stage === 'dev' ? 'dev' : 'prod';
+
+        // Process and upload image
+        const imagePath = await uploadProductImage(
+            imageFile.data,
+            gamingSystemId,
+            productId,
+            environment
+        );
+
+        console.log(`Image uploaded successfully: ${imagePath}`);
+
+        // Update product record with image path
+        const updateParams: UpdateCommandInput = {
+            TableName: TABLE_NAME,
+            Key: { ID: productId },
+            UpdateExpression: 'SET #image = :image, #updatedAt = :updatedAt',
+            ExpressionAttributeNames: {
+                '#image': 'Image',
+                '#updatedAt': 'UpdatedAt'
+            },
+            ExpressionAttributeValues: {
+                ':image': imagePath,
+                ':updatedAt': new Date().toISOString()
+            },
+            ReturnValues: 'ALL_NEW'
+        };
+
+        const result = await dynamodb.send(new UpdateCommand(updateParams));
+
+        return response(200, {
+            message: 'Image uploaded successfully',
+            imagePath: imagePath,
+            product: result.Attributes
+        });
+    } catch (error) {
+        console.error('Error in handleImageUpload:', error);
+        return handleError(error, 'handleImageUpload');
+    }
+}
 
 // Get single product by ID
 async function getProduct(id: string): Promise<APIGatewayProxyResult> {

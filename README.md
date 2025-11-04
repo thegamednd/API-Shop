@@ -105,8 +105,11 @@ Delete a product
 
 ## Environment Variables
 
-- `TABLE_NAME` - DynamoDB table name (default: "Shop-Products")
+- `TABLE_NAME` - DynamoDB table name (default: "Shop")
 - `AWS_REGION` - AWS region (default: "eu-west-2")
+- `STAGE` - Environment stage (default: "prod")
+  - Set to `"dev"` for development environment (uses `dev-realmforge-shop-media` bucket)
+  - Leave undefined for production environment (uses `realmforge-shop-media` bucket)
 
 ## Deployment
 
