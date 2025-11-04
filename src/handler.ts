@@ -15,7 +15,6 @@ import {
 } from '@aws-sdk/lib-dynamodb';
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { checkAuthentication } from './services/authService.js';
-import { parseMultipartFormData } from './services/multipartParser.js';
 import { uploadProductImage } from './services/imageUploadService.js';
 
 // Configure AWS SDK v3
@@ -97,9 +96,8 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
             return response(200, {});
         }
 
-        // Check if this is an image upload (multipart/form-data) - don't parse as JSON
-        const isImageUpload = path.includes('/upload-image') || path.includes('upload-image');
-        const body = (!isImageUpload && event.body) ? JSON.parse(event.body) : {};
+        // Parse JSON body for all requests (now using JSON for image uploads too)
+        const body = event.body ? JSON.parse(event.body) : {};
 
         console.log('Path parameters:', pathParams);
         console.log('Resource path:', event.resource);
@@ -155,7 +153,7 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
             case 'POST':
                 // Check if this is an image upload request
                 if (path.includes('/upload-image') || path.includes('upload-image')) {
-                    return await handleImageUpload(event, isAdminRoute);
+                    return await handleImageUpload(body, isAdminRoute);
                 }
                 return await createProduct(body);
 
@@ -188,8 +186,8 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     }
 };
 
-// Handle image upload
-async function handleImageUpload(event: APIGatewayProxyEvent, isAdminRoute: boolean): Promise<APIGatewayProxyResult> {
+// Handle image upload (now accepts base64 encoded image in JSON body)
+async function handleImageUpload(body: any, isAdminRoute: boolean): Promise<APIGatewayProxyResult> {
     try {
         // Only allow admin uploads
         if (!isAdminRoute) {
@@ -198,12 +196,8 @@ async function handleImageUpload(event: APIGatewayProxyEvent, isAdminRoute: bool
 
         console.log('Processing image upload request');
 
-        // Parse multipart form data
-        const formData = await parseMultipartFormData(event);
-
-        // Extract fields
-        const productId = formData.fields.productId;
-        const gamingSystemId = formData.fields.gamingSystemId;
+        // Extract fields from JSON body
+        const { imageBase64, imageFilename, imageType, productId, gamingSystemId } = body;
 
         if (!productId) {
             return response(400, { error: 'productId is required' });
@@ -213,19 +207,16 @@ async function handleImageUpload(event: APIGatewayProxyEvent, isAdminRoute: bool
             return response(400, { error: 'gamingSystemId is required' });
         }
 
-        // Check if image file was provided
-        if (formData.files.length === 0) {
-            return response(400, { error: 'No image file provided' });
-        }
-
-        const imageFile = formData.files[0];
-
-        // Validate image type
-        if (!imageFile.mimeType.startsWith('image/')) {
-            return response(400, { error: 'File must be an image' });
+        if (!imageBase64) {
+            return response(400, { error: 'imageBase64 is required' });
         }
 
         console.log(`Uploading image for product ${productId} in gaming system ${gamingSystemId}`);
+        console.log(`Image filename: ${imageFilename}, type: ${imageType}`);
+
+        // Convert base64 to buffer
+        const imageBuffer = Buffer.from(imageBase64, 'base64');
+        console.log(`Decoded image buffer: ${imageBuffer.length} bytes`);
 
         // Determine environment
         // STAGE = 'dev' for dev environment, undefined for prod environment
@@ -234,7 +225,7 @@ async function handleImageUpload(event: APIGatewayProxyEvent, isAdminRoute: bool
 
         // Process and upload image
         const imagePath = await uploadProductImage(
-            imageFile.data,
+            imageBuffer,
             gamingSystemId,
             productId,
             environment
