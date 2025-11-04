@@ -14,6 +14,7 @@ import {
     QueryCommandInput
 } from '@aws-sdk/lib-dynamodb';
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
+import { checkAuthentication } from './services/authService.js';
 
 // Configure AWS SDK v3
 const client = new DynamoDBClient({
@@ -42,6 +43,7 @@ interface Product {
     Content?: string; // HTML/Markdown description
     Image?: string; // Image URL or key
     IsArchived: boolean;
+    IsFeatured: boolean;
     CreatedAt: string; // ISO 8601 timestamp
     UpdatedAt: string; // ISO 8601 timestamp
     [key: string]: any; // Allow additional attributes
@@ -67,12 +69,13 @@ const handleError = (error: any, operation: string): APIGatewayProxyResult => {
 // Main Lambda handler
 export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
     console.log('Event:', JSON.stringify(event, null, 2));
-    
+
     try {
         const method = event.httpMethod;
         const pathParams = event.pathParameters || {};
         const queryParams = event.queryStringParameters || {};
         const body = event.body ? JSON.parse(event.body) : {};
+        const path = event.path || event.resource || '';
 
         // Handle OPTIONS for CORS
         if (method === 'OPTIONS') {
@@ -81,18 +84,44 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
         console.log('Path parameters:', pathParams);
         console.log('Resource path:', event.resource);
+        console.log('Path:', path);
         console.log('HTTP method:', method);
+
+        // Check if this is an admin route
+        const isAdminRoute = path.includes('/admin/shop');
+
+        // If admin route, check authentication and authorization
+        if (isAdminRoute) {
+            const authResult = await checkAuthentication(event);
+
+            if (authResult.statusCode !== 200) {
+                return response(authResult.statusCode, {
+                    error: authResult.message || 'Unauthorized'
+                });
+            }
+
+            if (!authResult.isAdmin) {
+                return response(403, {
+                    error: 'Administrator access required'
+                });
+            }
+
+            console.log('Admin authenticated:', authResult.userID);
+        }
 
         // Route requests
         switch (method) {
             case 'GET':
                 if (pathParams.id || pathParams.productId) {
-                    // Handle both /shop/{id} and /shop/products/product/{id} patterns
+                    // Handle both /shop/{id} and /admin/shop/{id} patterns
                     const productId = pathParams.id || pathParams.productId;
                     if (!productId) {
                         return response(400, { error: 'Product ID is required' });
                     }
                     return await getProduct(productId);
+                } else if (queryParams.featured === 'true') {
+                    // Get featured products only
+                    return await getFeaturedProducts(queryParams);
                 } else if (queryParams.gamingSystemId) {
                     // Get products by GamingSystemID
                     return await getProductsByGamingSystem(queryParams.gamingSystemId, queryParams);
@@ -100,27 +129,27 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
                     // Get products by Type
                     return await getProductsByType(queryParams.type, queryParams);
                 } else {
-                    // Default to getting all non-archived products
+                    // Default to getting all products (admin can see archived too)
                     return await getAllProducts(queryParams);
                 }
-                
+
             case 'POST':
                 return await createProduct(body);
-                
+
             case 'PUT':
                 if (pathParams.id) {
                     return await updateProduct(pathParams.id, body);
                 } else {
                     return response(400, { error: 'Product ID is required for updates' });
                 }
-                
+
             case 'DELETE':
                 if (pathParams.id) {
                     return await deleteProduct(pathParams.id);
                 } else {
                     return response(400, { error: 'Product ID is required for deletion' });
                 }
-                
+
             default:
                 return response(405, { error: 'Method not allowed' });
         }
@@ -338,6 +367,7 @@ async function createProduct(productData: Partial<Product>): Promise<APIGatewayP
             Content: productData.Content || '',
             Image: productData.Image || '',
             IsArchived: productData.IsArchived ?? false,
+            IsFeatured: productData.IsFeatured ?? false,
             CreatedAt: timestamp,
             UpdatedAt: timestamp,
             ...productData
@@ -402,6 +432,54 @@ async function updateProduct(id: string, updateData: Record<string, any>): Promi
     }
 }
 
+// Get featured products with filtering
+async function getFeaturedProducts(queryParams: Record<string, string | undefined>): Promise<APIGatewayProxyResult> {
+    try {
+        const params: any = {
+            TableName: TABLE_NAME,
+            FilterExpression: 'IsFeatured = :featured'
+        };
+
+        const expressionAttributeValues: Record<string, any> = {
+            ':featured': true
+        };
+
+        // Filter out archived products by default
+        const includeArchived = queryParams.includeArchived === 'true';
+        if (!includeArchived) {
+            params.FilterExpression += ' AND IsArchived = :archived';
+            expressionAttributeValues[':archived'] = false;
+        }
+
+        params.ExpressionAttributeValues = expressionAttributeValues;
+
+        // Add pagination if provided
+        if (queryParams.lastKey) {
+            params.ExclusiveStartKey = JSON.parse(decodeURIComponent(queryParams.lastKey));
+        }
+
+        if (queryParams.limit) {
+            params.Limit = parseInt(queryParams.limit);
+        }
+
+        const result = await dynamodb.send(new ScanCommand(params));
+
+        const responseBody: any = {
+            products: result.Items || [],
+            count: result.Items?.length || 0,
+            featured: true
+        };
+
+        if (result.LastEvaluatedKey) {
+            responseBody.lastKey = encodeURIComponent(JSON.stringify(result.LastEvaluatedKey));
+        }
+
+        return response(200, responseBody);
+    } catch (error) {
+        return handleError(error, 'getFeaturedProducts');
+    }
+}
+
 // Delete product
 async function deleteProduct(id: string): Promise<APIGatewayProxyResult> {
     try {
@@ -411,13 +489,13 @@ async function deleteProduct(id: string): Promise<APIGatewayProxyResult> {
             ConditionExpression: 'attribute_exists(ID)',
             ReturnValues: 'ALL_OLD'
         };
-        
+
         const result = await dynamodb.send(new DeleteCommand(params));
-        
+
         if (!result.Attributes) {
             return response(404, { error: 'Product not found' });
         }
-        
+
         return response(200, {
             message: 'Product deleted successfully',
             deletedProduct: result.Attributes
