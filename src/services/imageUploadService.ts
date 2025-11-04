@@ -61,7 +61,8 @@ export async function processImage(imageBuffer: Buffer): Promise<Buffer> {
         return processedBuffer;
     } catch (error) {
         console.error('Error processing image:', error);
-        throw new Error(`Failed to process image: ${error.message}`);
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        throw new Error(`Failed to process image: ${message}`);
     }
 }
 
@@ -104,7 +105,8 @@ export async function uploadImageToS3(
         return key;
     } catch (error) {
         console.error('Error uploading to S3:', error);
-        throw new Error(`Failed to upload image to S3: ${error.message}`);
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        throw new Error(`Failed to upload image to S3: ${message}`);
     }
 }
 
