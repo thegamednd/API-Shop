@@ -1,11 +1,12 @@
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { 
-    DynamoDBDocumentClient, 
-    GetCommand, 
-    PutCommand, 
-    UpdateCommand, 
-    DeleteCommand, 
+import {
+    DynamoDBDocumentClient,
+    GetCommand,
+    PutCommand,
+    UpdateCommand,
+    DeleteCommand,
     QueryCommand,
+    ScanCommand,
     GetCommandInput,
     PutCommandInput,
     UpdateCommandInput,
@@ -31,19 +32,18 @@ const CORS_HEADERS = {
     'Content-Type': 'application/json'
 };
 
-// Product interface
+// Product interface - Updated for new Shop table structure
 interface Product {
     ID: string;
     Name: string;
-    Category: string;
+    Type: string; // e.g., "GamingSystems"
     Price: number;
-    Status?: string;
-    Description?: string;
-    ImageURL?: string;
-    Stock?: number;
-    Tags?: string[];
-    CreatedAt?: number; // Changed to numeric timestamp
-    UpdatedAt?: number; // Changed to numeric timestamp
+    GamingSystemID: string;
+    Content?: string; // HTML/Markdown description
+    Image?: string; // Image URL or key
+    IsArchived: boolean;
+    CreatedAt: string; // ISO 8601 timestamp
+    UpdatedAt: string; // ISO 8601 timestamp
     [key: string]: any; // Allow additional attributes
 }
 
@@ -93,15 +93,15 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
                         return response(400, { error: 'Product ID is required' });
                     }
                     return await getProduct(productId);
-                } else if (queryParams.category) {
-                    // TODO: evaluate if we actually use this
-                    return await getProductsByCategory(queryParams.category, queryParams);
-                } else if (queryParams.status) {
-                    // TODO: evaluate if we actually use this
-                    return await getProductsByStatus(queryParams.status, queryParams);
+                } else if (queryParams.gamingSystemId) {
+                    // Get products by GamingSystemID
+                    return await getProductsByGamingSystem(queryParams.gamingSystemId, queryParams);
+                } else if (queryParams.type) {
+                    // Get products by Type
+                    return await getProductsByType(queryParams.type, queryParams);
                 } else {
-                    // Default to getting available products using the efficient Status-small-index GSI
-                    return await getProductsByStatus('available', queryParams);
+                    // Default to getting all non-archived products
+                    return await getAllProducts(queryParams);
                 }
                 
             case 'POST':
@@ -150,106 +150,167 @@ async function getProduct(id: string): Promise<APIGatewayProxyResult> {
 }
 
 
-// Get products by category using GSI
-async function getProductsByCategory(category: string, queryParams: Record<string, string | undefined>): Promise<APIGatewayProxyResult> {
+// Get products by GamingSystemID using GSI
+async function getProductsByGamingSystem(gamingSystemId: string, queryParams: Record<string, string | undefined>): Promise<APIGatewayProxyResult> {
     try {
         const params: QueryCommandInput = {
             TableName: TABLE_NAME,
-            IndexName: 'Category-CreatedAt-index',
-            KeyConditionExpression: 'Category = :category',
+            IndexName: 'GamingSystemID-index',
+            KeyConditionExpression: 'GamingSystemID = :gamingSystemId',
             ExpressionAttributeValues: {
-                ':category': category
-            },
-            ScanIndexForward: false // Sort by CreatedAt descending (newest first)
+                ':gamingSystemId': gamingSystemId
+            }
         };
-        
+
+        // Filter out archived products by default
+        const includeArchived = queryParams.includeArchived === 'true';
+        if (!includeArchived) {
+            params.FilterExpression = 'IsArchived = :archived';
+            params.ExpressionAttributeValues![':archived'] = false;
+        }
+
         // Add pagination if provided
         if (queryParams.lastKey) {
             params.ExclusiveStartKey = JSON.parse(decodeURIComponent(queryParams.lastKey));
         }
-        
+
         if (queryParams.limit) {
             params.Limit = parseInt(queryParams.limit);
         }
-        
+
+        // Add price range filtering if provided
+        if (queryParams.minPrice || queryParams.maxPrice) {
+            let filterExpr = params.FilterExpression || '';
+            const expressionAttributeValues = params.ExpressionAttributeValues || {};
+
+            if (queryParams.minPrice) {
+                if (filterExpr) filterExpr += ' AND ';
+                filterExpr += 'Price >= :minPrice';
+                expressionAttributeValues[':minPrice'] = parseFloat(queryParams.minPrice);
+            }
+
+            if (queryParams.maxPrice) {
+                if (filterExpr) filterExpr += ' AND ';
+                filterExpr += 'Price <= :maxPrice';
+                expressionAttributeValues[':maxPrice'] = parseFloat(queryParams.maxPrice);
+            }
+
+            params.FilterExpression = filterExpr;
+            params.ExpressionAttributeValues = expressionAttributeValues;
+        }
+
         const result = await dynamodb.send(new QueryCommand(params));
-        
+
         const responseBody: any = {
             products: result.Items || [],
             count: result.Items?.length || 0,
-            category: category
+            gamingSystemId: gamingSystemId
         };
-        
+
         if (result.LastEvaluatedKey) {
             responseBody.lastKey = encodeURIComponent(JSON.stringify(result.LastEvaluatedKey));
         }
-        
+
         return response(200, responseBody);
     } catch (error) {
-        return handleError(error, 'getProductsByCategory');
+        return handleError(error, 'getProductsByGamingSystem');
     }
 }
 
-// Get products by status using GSI
-async function getProductsByStatus(status: string, queryParams: Record<string, string | undefined>): Promise<APIGatewayProxyResult> {
+// Get all products with filtering
+async function getAllProducts(queryParams: Record<string, string | undefined>): Promise<APIGatewayProxyResult> {
     try {
-        const params: QueryCommandInput = {
-            TableName: TABLE_NAME,
-            IndexName: 'Status-small-index',
-            KeyConditionExpression: '#status = :status',
-            ExpressionAttributeNames: {
-                '#status': 'Status'
-            },
-            ExpressionAttributeValues: {
-                ':status': status
-            }
-            // Note: No ScanIndexForward as Status-small-index has no sort key
+        const params: any = {
+            TableName: TABLE_NAME
         };
-        
+
+        // Filter out archived products by default
+        const includeArchived = queryParams.includeArchived === 'true';
+        if (!includeArchived) {
+            params.FilterExpression = 'IsArchived = :archived';
+            params.ExpressionAttributeValues = { ':archived': false };
+        }
+
+        // Add Type filtering if provided
+        if (queryParams.type) {
+            const filterExpr = params.FilterExpression ? `${params.FilterExpression} AND #type = :type` : '#type = :type';
+            params.FilterExpression = filterExpr;
+            params.ExpressionAttributeNames = { '#type': 'Type' };
+            params.ExpressionAttributeValues = params.ExpressionAttributeValues || {};
+            params.ExpressionAttributeValues[':type'] = queryParams.type;
+        }
+
         // Add pagination if provided
         if (queryParams.lastKey) {
             params.ExclusiveStartKey = JSON.parse(decodeURIComponent(queryParams.lastKey));
         }
-        
+
         if (queryParams.limit) {
             params.Limit = parseInt(queryParams.limit);
         }
-        
-        // Add price range filtering if provided
-        if (queryParams.minPrice || queryParams.maxPrice) {
-            let filterExpression = '';
-            const expressionAttributeValues = params.ExpressionAttributeValues || {};
-            
-            if (queryParams.minPrice) {
-                filterExpression += 'Price >= :minPrice';
-                expressionAttributeValues[':minPrice'] = parseFloat(queryParams.minPrice);
-            }
-            
-            if (queryParams.maxPrice) {
-                if (filterExpression) filterExpression += ' AND ';
-                filterExpression += 'Price <= :maxPrice';
-                expressionAttributeValues[':maxPrice'] = parseFloat(queryParams.maxPrice);
-            }
-            
-            params.FilterExpression = filterExpression;
-            params.ExpressionAttributeValues = expressionAttributeValues;
-        }
-        
-        const result = await dynamodb.send(new QueryCommand(params));
-        
+
+        const result = await dynamodb.send(new ScanCommand(params));
+
         const responseBody: any = {
             products: result.Items || [],
-            count: result.Items?.length || 0,
-            status: status
+            count: result.Items?.length || 0
         };
-        
+
         if (result.LastEvaluatedKey) {
             responseBody.lastKey = encodeURIComponent(JSON.stringify(result.LastEvaluatedKey));
         }
-        
+
         return response(200, responseBody);
     } catch (error) {
-        return handleError(error, 'getProductsByStatus');
+        return handleError(error, 'getAllProducts');
+    }
+}
+
+// Get products by Type (for future optimization, could add a Type GSI)
+async function getProductsByType(type: string, queryParams: Record<string, string | undefined>): Promise<APIGatewayProxyResult> {
+    try {
+        const params: any = {
+            TableName: TABLE_NAME,
+            FilterExpression: '#type = :type',
+            ExpressionAttributeNames: {
+                '#type': 'Type'
+            },
+            ExpressionAttributeValues: {
+                ':type': type
+            }
+        };
+
+        // Filter out archived products by default
+        const includeArchived = queryParams.includeArchived === 'true';
+        if (!includeArchived) {
+            params.FilterExpression += ' AND IsArchived = :archived';
+            params.ExpressionAttributeValues[':archived'] = false;
+        }
+
+        // Add pagination if provided
+        if (queryParams.lastKey) {
+            params.ExclusiveStartKey = JSON.parse(decodeURIComponent(queryParams.lastKey));
+        }
+
+        if (queryParams.limit) {
+            params.Limit = parseInt(queryParams.limit);
+        }
+
+        const result = await dynamodb.send(new ScanCommand(params));
+
+        const responseBody: any = {
+            products: result.Items || [],
+            count: result.Items?.length || 0,
+            type: type
+        };
+
+        if (result.LastEvaluatedKey) {
+            responseBody.lastKey = encodeURIComponent(JSON.stringify(result.LastEvaluatedKey));
+        }
+
+        return response(200, responseBody);
+    } catch (error) {
+        return handleError(error, 'getProductsByType');
     }
 }
 
@@ -257,40 +318,39 @@ async function getProductsByStatus(status: string, queryParams: Record<string, s
 async function createProduct(productData: Partial<Product>): Promise<APIGatewayProxyResult> {
     try {
         // Validate required fields
-        if (!productData.Name || !productData.Category || !productData.Price) {
+        if (!productData.Name || !productData.Type || !productData.Price || !productData.GamingSystemID) {
             return response(400, {
                 error: 'Missing required fields',
-                required: ['Name', 'Category', 'Price']
+                required: ['Name', 'Type', 'Price', 'GamingSystemID']
             });
         }
-        
-        // Generate ID and Unix timestamp (seconds)
-        const timestamp = Math.floor(Date.now() / 1000);
-        const id = `product_${timestamp}_${Math.random().toString(36).substring(2, 11)}`;
-        
+
+        // Generate ID and ISO 8601 timestamp
+        const timestamp = new Date().toISOString();
+        const id = productData.ID || `${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+
         const product: Product = {
             ID: id,
             Name: productData.Name,
-            Category: productData.Category,
+            Type: productData.Type,
+            GamingSystemID: productData.GamingSystemID,
             Price: parseFloat(productData.Price.toString()),
-            Status: productData.Status || 'available',
-            Description: productData.Description || '',
-            ImageURL: productData.ImageURL || '',
-            Stock: productData.Stock || 0,
-            Tags: productData.Tags || [],
+            Content: productData.Content || '',
+            Image: productData.Image || '',
+            IsArchived: productData.IsArchived ?? false,
             CreatedAt: timestamp,
             UpdatedAt: timestamp,
             ...productData
         };
-        
+
         const params: PutCommandInput = {
             TableName: TABLE_NAME,
             Item: product,
             ConditionExpression: 'attribute_not_exists(ID)'
         };
-        
+
         await dynamodb.send(new PutCommand(params));
-        
+
         return response(201, product);
     } catch (error: any) {
         if (error.name === 'ConditionalCheckFailedException') {
@@ -306,9 +366,9 @@ async function updateProduct(id: string, updateData: Record<string, any>): Promi
         // Remove ID from update data if present
         delete updateData.ID;
         delete updateData.CreatedAt; // Prevent overwriting creation timestamp
-        
-        // Add Unix timestamp (seconds) for updated time
-        updateData.UpdatedAt = Math.floor(Date.now() / 1000);
+
+        // Add ISO 8601 timestamp for updated time
+        updateData.UpdatedAt = new Date().toISOString();
         
         // Build update expression
         const updateExpression: string[] = [];
