@@ -41,6 +41,7 @@ interface Product {
     Type: string; // e.g., "GamingSystems", "Spells", "Classes", "Rules"
     Price: number; // Price in cents (CAD) - e.g., 20000 = $200.00 CAD
     GamingSystemID: string;
+    ShortDescription?: string; // Brief summary of the product
     Content?: string; // HTML/Markdown description
     Image?: string; // Image URL or key
     IsArchived: boolean;
@@ -492,6 +493,7 @@ async function createProduct(productData: Partial<Product>): Promise<APIGatewayP
             Type: productData.Type,
             GamingSystemID: productData.GamingSystemID,
             Price: parseInt(productData.Price.toString()), // Price should be in cents (CAD)
+            ShortDescription: productData.ShortDescription || '',
             Content: productData.Content || '',
             Image: productData.Image || '',
             IsArchived: productData.IsArchived ?? false,
