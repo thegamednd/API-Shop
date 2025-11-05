@@ -449,7 +449,7 @@ async function getProductsByType(type: string, queryParams: Record<string, strin
 }
 
 // Create new product
-async function createProduct(productData: Partial<Product>): Promise<APIGatewayProxyResult> {
+async function createProduct(productData: any): Promise<APIGatewayProxyResult> {
     try {
         // Validate required fields
         if (!productData.Name || !productData.Type || !productData.Price || !productData.GamingSystemID) {
@@ -487,6 +487,49 @@ async function createProduct(productData: Partial<Product>): Promise<APIGatewayP
         const timestamp = new Date().toISOString();
         const id = productData.ID || `${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
 
+        // Handle image upload if imageBase64 is provided
+        let imagePath = productData.Image || '';
+        if (productData.imageBase64) {
+            console.log('Processing image upload during product creation');
+
+            // Validate base64 image size (max 1MB original)
+            const base64SizeBytes = (productData.imageBase64.length * 3) / 4;
+            const maxSizeBytes = 1 * 1024 * 1024; // 1MB
+
+            if (base64SizeBytes > maxSizeBytes) {
+                return response(400, {
+                    error: 'Image file too large (max 1MB)',
+                    size: Math.round(base64SizeBytes / 1024) + 'KB'
+                });
+            }
+
+            try {
+                // Convert base64 to buffer
+                const imageBuffer = Buffer.from(productData.imageBase64, 'base64');
+                console.log(`Decoded image buffer: ${imageBuffer.length} bytes`);
+
+                // Determine environment
+                const stage = process.env.STAGE || 'prod';
+                const environment: 'dev' | 'prod' = stage === 'dev' ? 'dev' : 'prod';
+
+                // Process and upload image
+                imagePath = await uploadProductImage(
+                    imageBuffer,
+                    productData.GamingSystemID,
+                    id,
+                    environment
+                );
+
+                console.log(`Image uploaded successfully: ${imagePath}`);
+            } catch (uploadError: any) {
+                console.error('Error uploading image:', uploadError);
+                return response(500, {
+                    error: 'Failed to upload image',
+                    message: uploadError.message
+                });
+            }
+        }
+
         const product: Product = {
             ID: id,
             Name: productData.Name,
@@ -495,12 +538,11 @@ async function createProduct(productData: Partial<Product>): Promise<APIGatewayP
             Price: parseInt(productData.Price.toString()), // Price should be in cents (CAD)
             ShortDescription: productData.ShortDescription || '',
             Content: productData.Content || '',
-            Image: productData.Image || '',
+            Image: imagePath,
             IsArchived: productData.IsArchived ?? false,
             IsFeatured: productData.IsFeatured ?? false,
             CreatedAt: timestamp,
-            UpdatedAt: timestamp,
-            ...productData
+            UpdatedAt: timestamp
         };
 
         const params: PutCommandInput = {
@@ -523,24 +565,87 @@ async function createProduct(productData: Partial<Product>): Promise<APIGatewayP
 // Update existing product
 async function updateProduct(id: string, updateData: Record<string, any>): Promise<APIGatewayProxyResult> {
     try {
+        // Handle image upload if imageBase64 is provided
+        if (updateData.imageBase64) {
+            console.log('Processing image upload during product update');
+
+            // Validate base64 image size (max 1MB original)
+            const base64SizeBytes = (updateData.imageBase64.length * 3) / 4;
+            const maxSizeBytes = 1 * 1024 * 1024; // 1MB
+
+            if (base64SizeBytes > maxSizeBytes) {
+                return response(400, {
+                    error: 'Image file too large (max 1MB)',
+                    size: Math.round(base64SizeBytes / 1024) + 'KB'
+                });
+            }
+
+            try {
+                // Get the product to retrieve GamingSystemID
+                const getParams: GetCommandInput = {
+                    TableName: TABLE_NAME,
+                    Key: { ID: id }
+                };
+                const existingProduct = await dynamodb.send(new GetCommand(getParams));
+
+                if (!existingProduct.Item) {
+                    return response(404, { error: 'Product not found' });
+                }
+
+                // Convert base64 to buffer
+                const imageBuffer = Buffer.from(updateData.imageBase64, 'base64');
+                console.log(`Decoded image buffer: ${imageBuffer.length} bytes`);
+
+                // Determine environment
+                const stage = process.env.STAGE || 'prod';
+                const environment: 'dev' | 'prod' = stage === 'dev' ? 'dev' : 'prod';
+
+                // Process and upload image
+                const imagePath = await uploadProductImage(
+                    imageBuffer,
+                    existingProduct.Item.GamingSystemID,
+                    id,
+                    environment
+                );
+
+                console.log(`Image uploaded successfully: ${imagePath}`);
+
+                // Replace imageBase64 with the uploaded image path
+                updateData.Image = imagePath;
+                delete updateData.imageBase64;
+                delete updateData.imageFilename;
+                delete updateData.imageType;
+            } catch (uploadError: any) {
+                console.error('Error uploading image:', uploadError);
+                return response(500, {
+                    error: 'Failed to upload image',
+                    message: uploadError.message
+                });
+            }
+        } else {
+            // Remove image-related fields if not updating image
+            delete updateData.imageFilename;
+            delete updateData.imageType;
+        }
+
         // Remove ID from update data if present
         delete updateData.ID;
         delete updateData.CreatedAt; // Prevent overwriting creation timestamp
 
         // Add ISO 8601 timestamp for updated time
         updateData.UpdatedAt = new Date().toISOString();
-        
+
         // Build update expression
         const updateExpression: string[] = [];
         const expressionAttributeNames: Record<string, string> = {};
         const expressionAttributeValues: Record<string, any> = {};
-        
+
         Object.keys(updateData).forEach(key => {
             updateExpression.push(`#${key} = :${key}`);
             expressionAttributeNames[`#${key}`] = key;
             expressionAttributeValues[`:${key}`] = updateData[key];
         });
-        
+
         const params: UpdateCommandInput = {
             TableName: TABLE_NAME,
             Key: { ID: id },
@@ -550,9 +655,9 @@ async function updateProduct(id: string, updateData: Record<string, any>): Promi
             ConditionExpression: 'attribute_exists(ID)',
             ReturnValues: 'ALL_NEW'
         };
-        
+
         const result = await dynamodb.send(new UpdateCommand(params));
-        
+
         return response(200, result.Attributes);
     } catch (error: any) {
         if (error.name === 'ConditionalCheckFailedException') {
