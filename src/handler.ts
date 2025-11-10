@@ -35,10 +35,15 @@ const CORS_HEADERS = {
 };
 
 // Product interface - Updated for new Shop table structure
+interface ProductItem {
+    Type: 'Maps' | 'Classes' | 'Spells' | 'Shop';
+    ID?: string; // Required for Maps and Shop, not needed for Classes/Spells
+}
+
 interface Product {
     ID: string;
     Name: string;
-    Type: string; // e.g., "GamingSystems", "Spells", "Classes", "Rules"
+    Items: ProductItem[]; // Array of items included in this product
     Price: number; // Price in cents (CAD) - e.g., 20000 = $200.00 CAD
     GamingSystemID: string;
     ShortDescription?: string; // Brief summary of the product
@@ -452,35 +457,49 @@ async function getProductsByType(type: string, queryParams: Record<string, strin
 async function createProduct(productData: any): Promise<APIGatewayProxyResult> {
     try {
         // Validate required fields
-        if (!productData.Name || !productData.Type || !productData.Price || !productData.GamingSystemID) {
+        if (!productData.Name || !productData.Price || !productData.GamingSystemID || !productData.Items) {
             return response(400, {
                 error: 'Missing required fields',
-                required: ['Name', 'Type', 'Price', 'GamingSystemID']
+                required: ['Name', 'Items', 'Price', 'GamingSystemID']
             });
         }
 
-        // Check if GamingSystemID + Type combination already exists
-        const uniqueCheckParams: QueryCommandInput = {
-            TableName: TABLE_NAME,
-            IndexName: 'GamingSystemID-Type-keys-index',
-            KeyConditionExpression: 'GamingSystemID = :gamingSystemId AND #type = :type',
-            ExpressionAttributeNames: {
-                '#type': 'Type'
-            },
-            ExpressionAttributeValues: {
-                ':gamingSystemId': productData.GamingSystemID,
-                ':type': productData.Type
-            },
-            Limit: 1
-        };
-
-        const existingProduct = await dynamodb.send(new QueryCommand(uniqueCheckParams));
-
-        if (existingProduct.Items && existingProduct.Items.length > 0) {
-            return response(409, {
-                error: 'Product with this Gaming System and Type combination already exists',
-                existingProductId: existingProduct.Items[0].ID
+        // Validate Items array
+        if (!Array.isArray(productData.Items) || productData.Items.length === 0) {
+            return response(400, {
+                error: 'Items must be a non-empty array',
+                message: 'At least one item is required'
             });
+        }
+
+        // Validate each item in Items array
+        const validTypes = ['Maps', 'Classes', 'Spells', 'Shop'];
+        for (const item of productData.Items) {
+            if (!item.Type || !validTypes.includes(item.Type)) {
+                return response(400, {
+                    error: 'Invalid item Type',
+                    message: `Type must be one of: ${validTypes.join(', ')}`,
+                    invalidItem: item
+                });
+            }
+
+            // Maps and Shop require ID
+            if ((item.Type === 'Maps' || item.Type === 'Shop') && !item.ID) {
+                return response(400, {
+                    error: 'Missing ID for item',
+                    message: `${item.Type} items require an ID`,
+                    invalidItem: item
+                });
+            }
+
+            // Validate ID format (basic UUID check)
+            if (item.ID && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(item.ID)) {
+                return response(400, {
+                    error: 'Invalid ID format',
+                    message: 'ID must be a valid UUID',
+                    invalidItem: item
+                });
+            }
         }
 
         // Generate ID and ISO 8601 timestamp
@@ -533,7 +552,7 @@ async function createProduct(productData: any): Promise<APIGatewayProxyResult> {
         const product: Product = {
             ID: id,
             Name: productData.Name,
-            Type: productData.Type,
+            Items: productData.Items,
             GamingSystemID: productData.GamingSystemID,
             Price: parseInt(productData.Price.toString()), // Price should be in cents (CAD)
             ShortDescription: productData.ShortDescription || '',
