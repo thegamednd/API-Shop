@@ -79,6 +79,7 @@ const handleError = (error: any, operation: string): APIGatewayProxyResult => {
  * Public Routes:
  * - GET /shop - Get all active products
  * - GET /shop/{id} - Get single product by ID
+ * - GET /shop/products/product/{id} - Get single product by ID (no auth required - for shop item references)
  *
  * Admin Routes (requires Administrators group membership):
  * - GET /admin/shop - Get all products (including archived)
@@ -109,6 +110,15 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
         console.log('Resource path:', event.resource);
         console.log('Path:', path);
         console.log('HTTP method:', method);
+
+        // Handle public /shop/products/product/{id} route (no auth required)
+        if (method === 'GET' && path.includes('/shop/products/product/')) {
+            const productId = pathParams.id || pathParams.productId;
+            if (!productId) {
+                return response(400, { error: 'Product ID is required' });
+            }
+            return await getProduct(productId);
+        }
 
         // Check if this is an admin route
         const isAdminRoute = path.includes('/admin/shop');
