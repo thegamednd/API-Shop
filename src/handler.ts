@@ -163,7 +163,7 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
                     return await getProductsByType(queryParams.type, queryParams);
                 } else {
                     // Default to getting all products (admin can see archived too)
-                    return await getAllProducts(queryParams);
+                    return await getAllProducts(queryParams, isAdminRoute);
                 }
 
             case 'POST':
@@ -367,14 +367,18 @@ async function getProductsByGamingSystem(gamingSystemId: string, queryParams: Re
 }
 
 // Get all products with filtering
-async function getAllProducts(queryParams: Record<string, string | undefined>): Promise<APIGatewayProxyResult> {
+async function getAllProducts(queryParams: Record<string, string | undefined>, isAdminRoute: boolean = false): Promise<APIGatewayProxyResult> {
     try {
         const params: any = {
             TableName: TABLE_NAME
         };
 
-        // Filter out archived products by default
-        const includeArchived = queryParams.includeArchived === 'true';
+        // For admin routes, include archived by default
+        // For public routes, exclude archived by default
+        // Query param can override either behavior
+        const includeArchived = queryParams.includeArchived === 'true' ||
+                               (queryParams.includeArchived !== 'false' && isAdminRoute);
+
         if (!includeArchived) {
             params.FilterExpression = 'IsArchived = :archived';
             params.ExpressionAttributeValues = { ':archived': false };
