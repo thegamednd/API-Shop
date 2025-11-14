@@ -81,7 +81,7 @@ export async function uploadImageToS3(
     environment: 'dev' | 'prod' = 'dev'
 ): Promise<string> {
     try {
-        const bucket = environment === 'prod' ? 'realmforge-shop-media' : 'dev-realmforge-shop-media';
+        const bucket = environment === 'prod' ? 'prod-realmforge-shop' : 'dev-realmforge-shop-media';
         const key = `${gamingSystemId}/${shopId}/product.jpg`;
 
         console.log(`Uploading image to S3: ${bucket}/${key}`);
