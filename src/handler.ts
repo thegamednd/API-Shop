@@ -36,8 +36,8 @@ const CORS_HEADERS = {
 
 // Product interface - Updated for new Shop table structure
 interface ProductItem {
-    Type: 'Maps' | 'Classes' | 'Spells' | 'Shop';
-    ID?: string; // Required for Maps and Shop, not needed for Classes/Spells
+    Type: 'Maps' | 'Classes' | 'Spells' | 'Modules' | 'Shop';
+    ID?: string; // Required for Maps, Modules, and Shop, not needed for Classes/Spells
 }
 
 interface Product {
@@ -487,7 +487,7 @@ async function createProduct(productData: any): Promise<APIGatewayProxyResult> {
         }
 
         // Validate each item in Items array
-        const validTypes = ['Maps', 'Classes', 'Spells', 'Shop'];
+        const validTypes = ['Maps', 'Classes', 'Spells', 'Modules', 'Shop'];
         for (const item of productData.Items) {
             if (!item.Type || !validTypes.includes(item.Type)) {
                 return response(400, {
@@ -497,8 +497,8 @@ async function createProduct(productData: any): Promise<APIGatewayProxyResult> {
                 });
             }
 
-            // Maps and Shop require ID
-            if ((item.Type === 'Maps' || item.Type === 'Shop') && !item.ID) {
+            // Maps, Modules, and Shop require ID
+            if ((item.Type === 'Maps' || item.Type === 'Modules' || item.Type === 'Shop') && !item.ID) {
                 return response(400, {
                     error: 'Missing ID for item',
                     message: `${item.Type} items require an ID`,
