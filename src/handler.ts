@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import {
     DynamoDBDocumentClient,
@@ -518,7 +519,7 @@ async function createProduct(productData: any): Promise<APIGatewayProxyResult> {
 
         // Generate ID and ISO 8601 timestamp
         const timestamp = new Date().toISOString();
-        const id = productData.ID || `${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+        const id = productData.ID || randomUUID();
 
         // Handle image upload if imageBase64 is provided
         let imagePath = productData.Image || '';
