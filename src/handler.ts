@@ -81,6 +81,7 @@ const handleError = (error: any, operation: string): APIGatewayProxyResult => {
  * - GET /shop - Get all active products
  * - GET /shop/{id} - Get single product by ID
  * - GET /shop/products/product/{id} - Get single product by ID (no auth required - for shop item references)
+ * - GET /shop/systems/system/{id} - Get all products for a gaming system (no auth required)
  *
  * Admin Routes (requires Administrators group membership):
  * - GET /admin/shop - Get all products (including archived)
@@ -119,6 +120,16 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
                 return response(400, { error: 'Product ID is required' });
             }
             return await getProduct(productId);
+        }
+
+        // Handle public /shop/systems/system/{id} route (no auth required)
+        // Returns all shop products for a given gaming system ID
+        if (method === 'GET' && path.includes('/shop/systems/system/')) {
+            const systemId = pathParams.id || pathParams.systemId;
+            if (!systemId) {
+                return response(400, { error: 'Gaming System ID is required' });
+            }
+            return await getProductsByGamingSystem(systemId, queryParams, event);
         }
 
         // Check if this is an admin route
@@ -301,7 +312,7 @@ async function getProduct(id: string): Promise<APIGatewayProxyResult> {
 
 
 // Get products by GamingSystemID using GSI
-async function getProductsByGamingSystem(gamingSystemId: string, queryParams: Record<string, string | undefined>): Promise<APIGatewayProxyResult> {
+async function getProductsByGamingSystem(gamingSystemId: string, queryParams: Record<string, string | undefined>, event?: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
     try {
         const params: QueryCommandInput = {
             TableName: TABLE_NAME,
@@ -311,6 +322,10 @@ async function getProductsByGamingSystem(gamingSystemId: string, queryParams: Re
                 ':gamingSystemId': gamingSystemId
             }
         };
+
+        // Check if request is from /realm/create page
+        const referer = event?.headers?.referer || event?.headers?.Referer || '';
+        const isFromRealmCreate = referer.includes('/realm/create');
 
         // Filter out archived products by default
         const includeArchived = queryParams.includeArchived === 'true';
@@ -350,10 +365,41 @@ async function getProductsByGamingSystem(gamingSystemId: string, queryParams: Re
         }
 
         const result = await dynamodb.send(new QueryCommand(params));
+        let products = result.Items || [];
+
+        // If request is from /realm/create and we're not already including archived,
+        // check if we need to add "RealmForge Essentials" for this gaming system
+        if (isFromRealmCreate && !includeArchived) {
+            // Query for RealmForge Essentials (which may be archived)
+            const essentialsParams: QueryCommandInput = {
+                TableName: TABLE_NAME,
+                IndexName: 'GamingSystemID-index',
+                KeyConditionExpression: 'GamingSystemID = :gamingSystemId',
+                FilterExpression: '#name = :essentialsName',
+                ExpressionAttributeNames: {
+                    '#name': 'Name'
+                },
+                ExpressionAttributeValues: {
+                    ':gamingSystemId': gamingSystemId,
+                    ':essentialsName': 'RealmForge Essentials'
+                }
+            };
+
+            const essentialsResult = await dynamodb.send(new QueryCommand(essentialsParams));
+
+            if (essentialsResult.Items && essentialsResult.Items.length > 0) {
+                const essentialsProduct = essentialsResult.Items[0];
+                // Add it if it's not already in the results
+                const alreadyIncluded = products.some((p: any) => p.ID === essentialsProduct.ID);
+                if (!alreadyIncluded) {
+                    products = [essentialsProduct, ...products];
+                }
+            }
+        }
 
         const responseBody: any = {
-            products: result.Items || [],
-            count: result.Items?.length || 0,
+            products: products,
+            count: products.length,
             gamingSystemId: gamingSystemId
         };
 
