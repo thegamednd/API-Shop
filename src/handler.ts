@@ -324,8 +324,8 @@ async function getProductsByGamingSystem(gamingSystemId: string, queryParams: Re
         };
 
         // Check if request is from /realm/create page
-        const referer = event?.headers?.referer || event?.headers?.Referer || '';
-        const isFromRealmCreate = referer.includes('/realm/create');
+        // Use query parameter since referer header may not be passed through API Gateway
+        const isFromRealmCreate = queryParams.source === 'realm-create';
 
         // Filter out archived products by default
         const includeArchived = queryParams.includeArchived === 'true';
