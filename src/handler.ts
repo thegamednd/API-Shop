@@ -472,7 +472,7 @@ async function getProductsByType(type: string, queryParams: Record<string, strin
 async function createProduct(productData: any): Promise<APIGatewayProxyResult> {
     try {
         // Validate required fields
-        if (!productData.Name || !productData.Price || !productData.GamingSystemID || !productData.Items) {
+        if (!productData.Name || productData.Price === undefined || productData.Price === null || !productData.GamingSystemID || !productData.Items) {
             return response(400, {
                 error: 'Missing required fields',
                 required: ['Name', 'Items', 'Price', 'GamingSystemID']
