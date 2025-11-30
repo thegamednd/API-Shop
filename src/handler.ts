@@ -16,7 +16,7 @@ import {
 } from '@aws-sdk/lib-dynamodb';
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { checkAuthentication } from './services/authService.js';
-import { uploadProductImage } from './services/imageUploadService.js';
+import { uploadProductImage, deleteProductFolder } from './services/imageUploadService.js';
 
 // Configure AWS SDK v3
 const client = new DynamoDBClient({
@@ -921,6 +921,10 @@ async function deleteProduct(id: string): Promise<APIGatewayProxyResult> {
         if (!result.Attributes) {
             return response(404, { error: 'Product not found' });
         }
+
+        // Delete the S3 folder for this product (don't fail if this errors)
+        const environment = (process.env.ENVIRONMENT || 'dev') as 'dev' | 'prod';
+        await deleteProductFolder(gamingSystemId, id, environment);
 
         return response(200, {
             message: 'Product deleted successfully',
