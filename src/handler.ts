@@ -26,6 +26,7 @@ const client = new DynamoDBClient({
 const dynamodb = DynamoDBDocumentClient.from(client);
 
 const TABLE_NAME = process.env.TABLE_NAME || 'Shop';
+const ACCOUNTS_TABLE_NAME = process.env.ACCOUNTS_TABLE_NAME || 'Accounts';
 
 // CORS headers
 const CORS_HEADERS = {
@@ -798,14 +799,76 @@ async function getFeaturedProducts(queryParams: Record<string, string | undefine
 // Delete product
 async function deleteProduct(id: string): Promise<APIGatewayProxyResult> {
     try {
-        const params: DeleteCommandInput = {
+        // First, get the product to find its GamingSystemID
+        const getParams: GetCommandInput = {
+            TableName: TABLE_NAME,
+            Key: { ID: id }
+        };
+
+        const productResult = await dynamodb.send(new GetCommand(getParams));
+
+        if (!productResult.Item) {
+            return response(404, { error: 'Product not found' });
+        }
+
+        const product = productResult.Item as Product;
+        const gamingSystemId = product.GamingSystemID;
+
+        // Scan Accounts table for any accounts that have this shop item in their Access map
+        const accountsWithAccess: Array<{ ID: string; Email: string }> = [];
+        let lastEvaluatedKey: Record<string, any> | undefined = undefined;
+
+        do {
+            const scanParams: any = {
+                TableName: ACCOUNTS_TABLE_NAME,
+                ProjectionExpression: 'ID, Email, #access',
+                ExpressionAttributeNames: {
+                    '#access': 'Access'
+                }
+            };
+
+            if (lastEvaluatedKey) {
+                scanParams.ExclusiveStartKey = lastEvaluatedKey;
+            }
+
+            const scanResult = await dynamodb.send(new ScanCommand(scanParams));
+
+            if (scanResult.Items) {
+                for (const account of scanResult.Items) {
+                    const accessMap = account.Access as Record<string, string[]> | undefined;
+                    if (accessMap && accessMap[gamingSystemId]) {
+                        // Check if this shop item ID is in the array for this gaming system
+                        if (accessMap[gamingSystemId].includes(id)) {
+                            accountsWithAccess.push({
+                                ID: account.ID as string,
+                                Email: account.Email as string
+                            });
+                        }
+                    }
+                }
+            }
+
+            lastEvaluatedKey = scanResult.LastEvaluatedKey;
+        } while (lastEvaluatedKey);
+
+        // If any accounts have access to this shop item, return 409 Conflict
+        if (accountsWithAccess.length > 0) {
+            return response(409, {
+                error: 'Cannot delete product - accounts still have access',
+                message: `${accountsWithAccess.length} account(s) still have access to this shop item. Remove access from these accounts before deleting.`,
+                accounts: accountsWithAccess
+            });
+        }
+
+        // No accounts have access, proceed with deletion
+        const deleteParams: DeleteCommandInput = {
             TableName: TABLE_NAME,
             Key: { ID: id },
             ConditionExpression: 'attribute_exists(ID)',
             ReturnValues: 'ALL_OLD'
         };
 
-        const result = await dynamodb.send(new DeleteCommand(params));
+        const result = await dynamodb.send(new DeleteCommand(deleteParams));
 
         if (!result.Attributes) {
             return response(404, { error: 'Product not found' });
