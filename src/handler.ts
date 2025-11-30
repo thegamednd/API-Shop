@@ -27,6 +27,7 @@ const dynamodb = DynamoDBDocumentClient.from(client);
 
 const TABLE_NAME = process.env.TABLE_NAME || 'Shop';
 const ACCOUNTS_TABLE_NAME = process.env.ACCOUNTS_TABLE_NAME || 'Accounts';
+const GAMING_SYSTEMS_TABLE_NAME = process.env.GAMING_SYSTEMS_TABLE_NAME || 'GamingSystems';
 
 // CORS headers
 const CORS_HEADERS = {
@@ -851,16 +852,63 @@ async function deleteProduct(id: string): Promise<APIGatewayProxyResult> {
             lastEvaluatedKey = scanResult.LastEvaluatedKey;
         } while (lastEvaluatedKey);
 
-        // If any accounts have access to this shop item, return 409 Conflict
-        if (accountsWithAccess.length > 0) {
+        // Check if any gaming system requires this shop item
+        const gamingSystemsRequiringItem: Array<{ ID: string; Name: string }> = [];
+        let gsLastEvaluatedKey: Record<string, any> | undefined = undefined;
+
+        do {
+            const gsScanParams: any = {
+                TableName: GAMING_SYSTEMS_TABLE_NAME,
+                ProjectionExpression: 'ID, #name, RequiredShopItem',
+                ExpressionAttributeNames: {
+                    '#name': 'Name'
+                },
+                FilterExpression: 'RequiredShopItem = :shopItemId',
+                ExpressionAttributeValues: {
+                    ':shopItemId': id
+                }
+            };
+
+            if (gsLastEvaluatedKey) {
+                gsScanParams.ExclusiveStartKey = gsLastEvaluatedKey;
+            }
+
+            const gsScanResult = await dynamodb.send(new ScanCommand(gsScanParams));
+
+            if (gsScanResult.Items) {
+                for (const system of gsScanResult.Items) {
+                    gamingSystemsRequiringItem.push({
+                        ID: system.ID as string,
+                        Name: system.Name as string
+                    });
+                }
+            }
+
+            gsLastEvaluatedKey = gsScanResult.LastEvaluatedKey;
+        } while (gsLastEvaluatedKey);
+
+        // If any accounts have access OR gaming systems require this item, return 409 Conflict
+        if (accountsWithAccess.length > 0 || gamingSystemsRequiringItem.length > 0) {
+            const errors: string[] = [];
+
+            if (gamingSystemsRequiringItem.length > 0) {
+                const systemNames = gamingSystemsRequiringItem.map(s => s.Name).join(', ');
+                errors.push(`This shop item is required by the following gaming system(s): ${systemNames}. Remove the RequiredShopItem setting from these gaming systems before deleting.`);
+            }
+
+            if (accountsWithAccess.length > 0) {
+                errors.push(`${accountsWithAccess.length} account(s) still have access to this shop item. Remove access from these accounts before deleting.`);
+            }
+
             return response(409, {
-                error: 'Cannot delete product - accounts still have access',
-                message: `${accountsWithAccess.length} account(s) still have access to this shop item. Remove access from these accounts before deleting.`,
-                accounts: accountsWithAccess
+                error: 'Cannot delete product',
+                message: errors.join(' '),
+                accounts: accountsWithAccess,
+                gamingSystems: gamingSystemsRequiringItem
             });
         }
 
-        // No accounts have access, proceed with deletion
+        // No accounts have access and no gaming systems require it, proceed with deletion
         const deleteParams: DeleteCommandInput = {
             TableName: TABLE_NAME,
             Key: { ID: id },
