@@ -39,8 +39,8 @@ const CORS_HEADERS = {
 
 // Product interface - Updated for new Shop table structure
 interface ProductItem {
-    Type: 'Maps' | 'Classes' | 'Spells' | 'Modules' | 'Shop';
-    ID?: string; // Required for Maps, Modules, and Shop, not needed for Classes/Spells
+    Type: 'Maps' | 'Classes' | 'Spells' | 'Races' | 'Modules' | 'Shop';
+    ID?: string; // Required for Maps, Modules, and Shop, not needed for Classes/Spells/Races
 }
 
 interface Product {
@@ -536,7 +536,7 @@ async function createProduct(productData: any): Promise<APIGatewayProxyResult> {
         }
 
         // Validate each item in Items array
-        const validTypes = ['Maps', 'Classes', 'Spells', 'Modules', 'Shop'];
+        const validTypes = ['Maps', 'Classes', 'Spells', 'Races', 'Modules', 'Shop'];
         for (const item of productData.Items) {
             if (!item.Type || !validTypes.includes(item.Type)) {
                 return response(400, {
