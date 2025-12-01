@@ -314,7 +314,7 @@ async function getProduct(id: string): Promise<APIGatewayProxyResult> {
 
 
 // Get products by GamingSystemID using GSI
-async function getProductsByGamingSystem(gamingSystemId: string, queryParams: Record<string, string | undefined>, event?: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
+async function getProductsByGamingSystem(gamingSystemId: string, queryParams: Record<string, string | undefined>, _event?: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
     try {
         const params: QueryCommandInput = {
             TableName: TABLE_NAME,
