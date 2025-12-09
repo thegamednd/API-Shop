@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, ListObjectsV2Command, DeleteObjectsCommand } from '@aws-sdk/client-s3';
 import sharp from 'sharp';
 
 const TARGET_WIDTH = 300;
@@ -145,5 +145,60 @@ export async function uploadProductImage(
     } catch (error) {
         console.error('Error in uploadProductImage:', error);
         throw error;
+    }
+}
+
+/**
+ * Delete all objects in the shop item's S3 folder
+ * @param gamingSystemId - Gaming system ID
+ * @param shopId - Shop product ID
+ * @param environment - 'dev' or 'prod'
+ */
+export async function deleteProductFolder(
+    gamingSystemId: string,
+    shopId: string,
+    environment: 'dev' | 'prod' = 'dev'
+): Promise<void> {
+    try {
+        const bucket = environment === 'prod' ? 'prod-realmforge-shop-media' : 'dev-realmforge-shop-media';
+        const prefix = `${gamingSystemId}/${shopId}/`;
+
+        console.log(`Deleting S3 folder: ${bucket}/${prefix}`);
+
+        const s3Client = new S3Client({ region: process.env.AWS_REGION || 'eu-west-2' });
+
+        // List all objects with the prefix
+        const listCommand = new ListObjectsV2Command({
+            Bucket: bucket,
+            Prefix: prefix
+        });
+
+        const listResult = await s3Client.send(listCommand);
+
+        if (!listResult.Contents || listResult.Contents.length === 0) {
+            console.log(`No objects found in ${prefix}`);
+            return;
+        }
+
+        // Delete all objects
+        const objectsToDelete = listResult.Contents.map(obj => ({ Key: obj.Key }));
+
+        console.log(`Deleting ${objectsToDelete.length} objects from ${prefix}`);
+
+        const deleteCommand = new DeleteObjectsCommand({
+            Bucket: bucket,
+            Delete: {
+                Objects: objectsToDelete,
+                Quiet: true
+            }
+        });
+
+        await s3Client.send(deleteCommand);
+
+        console.log(`Successfully deleted folder: ${prefix}`);
+    } catch (error) {
+        console.error('Error deleting S3 folder:', error);
+        // Don't throw - we don't want to fail the delete operation if S3 cleanup fails
+        // The product record is already deleted at this point
     }
 }

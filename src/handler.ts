@@ -16,7 +16,7 @@ import {
 } from '@aws-sdk/lib-dynamodb';
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { checkAuthentication } from './services/authService.js';
-import { uploadProductImage } from './services/imageUploadService.js';
+import { uploadProductImage, deleteProductFolder } from './services/imageUploadService.js';
 
 // Configure AWS SDK v3
 const client = new DynamoDBClient({
@@ -26,6 +26,8 @@ const client = new DynamoDBClient({
 const dynamodb = DynamoDBDocumentClient.from(client);
 
 const TABLE_NAME = process.env.TABLE_NAME || 'Shop';
+const ACCOUNTS_TABLE_NAME = process.env.ACCOUNTS_TABLE_NAME || 'Accounts';
+const GAMING_SYSTEMS_TABLE_NAME = process.env.GAMING_SYSTEMS_TABLE_NAME || 'GamingSystems';
 
 // CORS headers
 const CORS_HEADERS = {
@@ -37,8 +39,8 @@ const CORS_HEADERS = {
 
 // Product interface - Updated for new Shop table structure
 interface ProductItem {
-    Type: 'Maps' | 'Classes' | 'Spells' | 'Modules' | 'Shop';
-    ID?: string; // Required for Maps, Modules, and Shop, not needed for Classes/Spells
+    Type: 'Maps' | 'Classes' | 'Spells' | 'Races' | 'Modules' | 'Shop';
+    ID?: string; // Required for Maps, Modules, and Shop, not needed for Classes/Spells/Races
 }
 
 interface Product {
@@ -81,6 +83,7 @@ const handleError = (error: any, operation: string): APIGatewayProxyResult => {
  * - GET /shop - Get all active products
  * - GET /shop/{id} - Get single product by ID
  * - GET /shop/products/product/{id} - Get single product by ID (no auth required - for shop item references)
+ * - GET /shop/systems/system/{id} - Get all products for a gaming system (no auth required)
  *
  * Admin Routes (requires Administrators group membership):
  * - GET /admin/shop - Get all products (including archived)
@@ -119,6 +122,16 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
                 return response(400, { error: 'Product ID is required' });
             }
             return await getProduct(productId);
+        }
+
+        // Handle public /shop/systems/system/{id} route (no auth required)
+        // Returns all shop products for a given gaming system ID
+        if (method === 'GET' && path.includes('/shop/systems/system/')) {
+            const systemId = pathParams.id || pathParams.systemId;
+            if (!systemId) {
+                return response(400, { error: 'Gaming System ID is required' });
+            }
+            return await getProductsByGamingSystem(systemId, queryParams, event);
         }
 
         // Check if this is an admin route
@@ -301,7 +314,7 @@ async function getProduct(id: string): Promise<APIGatewayProxyResult> {
 
 
 // Get products by GamingSystemID using GSI
-async function getProductsByGamingSystem(gamingSystemId: string, queryParams: Record<string, string | undefined>): Promise<APIGatewayProxyResult> {
+async function getProductsByGamingSystem(gamingSystemId: string, queryParams: Record<string, string | undefined>, _event?: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
     try {
         const params: QueryCommandInput = {
             TableName: TABLE_NAME,
@@ -311,6 +324,10 @@ async function getProductsByGamingSystem(gamingSystemId: string, queryParams: Re
                 ':gamingSystemId': gamingSystemId
             }
         };
+
+        // Check if request is from /realm/create page
+        // Use query parameter since referer header may not be passed through API Gateway
+        const isFromRealmCreate = queryParams.source === 'realm-create';
 
         // Filter out archived products by default
         const includeArchived = queryParams.includeArchived === 'true';
@@ -350,10 +367,41 @@ async function getProductsByGamingSystem(gamingSystemId: string, queryParams: Re
         }
 
         const result = await dynamodb.send(new QueryCommand(params));
+        let products = result.Items || [];
+
+        // If request is from /realm/create and we're not already including archived,
+        // check if we need to add "RealmForge Essentials" for this gaming system
+        if (isFromRealmCreate && !includeArchived) {
+            // Query for RealmForge Essentials (which may be archived)
+            const essentialsParams: QueryCommandInput = {
+                TableName: TABLE_NAME,
+                IndexName: 'GamingSystemID-index',
+                KeyConditionExpression: 'GamingSystemID = :gamingSystemId',
+                FilterExpression: '#name = :essentialsName',
+                ExpressionAttributeNames: {
+                    '#name': 'Name'
+                },
+                ExpressionAttributeValues: {
+                    ':gamingSystemId': gamingSystemId,
+                    ':essentialsName': 'RealmForge Essentials'
+                }
+            };
+
+            const essentialsResult = await dynamodb.send(new QueryCommand(essentialsParams));
+
+            if (essentialsResult.Items && essentialsResult.Items.length > 0) {
+                const essentialsProduct = essentialsResult.Items[0];
+                // Add it if it's not already in the results
+                const alreadyIncluded = products.some((p: any) => p.ID === essentialsProduct.ID);
+                if (!alreadyIncluded) {
+                    products = [essentialsProduct, ...products];
+                }
+            }
+        }
 
         const responseBody: any = {
-            products: result.Items || [],
-            count: result.Items?.length || 0,
+            products: products,
+            count: products.length,
             gamingSystemId: gamingSystemId
         };
 
@@ -472,7 +520,7 @@ async function getProductsByType(type: string, queryParams: Record<string, strin
 async function createProduct(productData: any): Promise<APIGatewayProxyResult> {
     try {
         // Validate required fields
-        if (!productData.Name || !productData.Price || !productData.GamingSystemID || !productData.Items) {
+        if (!productData.Name || productData.Price === undefined || productData.Price === null || !productData.GamingSystemID || !productData.Items) {
             return response(400, {
                 error: 'Missing required fields',
                 required: ['Name', 'Items', 'Price', 'GamingSystemID']
@@ -488,7 +536,7 @@ async function createProduct(productData: any): Promise<APIGatewayProxyResult> {
         }
 
         // Validate each item in Items array
-        const validTypes = ['Maps', 'Classes', 'Spells', 'Modules', 'Shop'];
+        const validTypes = ['Maps', 'Classes', 'Spells', 'Races', 'Modules', 'Shop'];
         for (const item of productData.Items) {
             if (!item.Type || !validTypes.includes(item.Type)) {
                 return response(400, {
@@ -752,18 +800,131 @@ async function getFeaturedProducts(queryParams: Record<string, string | undefine
 // Delete product
 async function deleteProduct(id: string): Promise<APIGatewayProxyResult> {
     try {
-        const params: DeleteCommandInput = {
+        // First, get the product to find its GamingSystemID
+        const getParams: GetCommandInput = {
+            TableName: TABLE_NAME,
+            Key: { ID: id }
+        };
+
+        const productResult = await dynamodb.send(new GetCommand(getParams));
+
+        if (!productResult.Item) {
+            return response(404, { error: 'Product not found' });
+        }
+
+        const product = productResult.Item as Product;
+        const gamingSystemId = product.GamingSystemID;
+
+        // Scan Accounts table for any accounts that have this shop item in their Access map
+        const accountsWithAccess: Array<{ ID: string; Email: string }> = [];
+        let lastEvaluatedKey: Record<string, any> | undefined = undefined;
+
+        do {
+            const scanParams: any = {
+                TableName: ACCOUNTS_TABLE_NAME,
+                ProjectionExpression: 'ID, Email, #access',
+                ExpressionAttributeNames: {
+                    '#access': 'Access'
+                }
+            };
+
+            if (lastEvaluatedKey) {
+                scanParams.ExclusiveStartKey = lastEvaluatedKey;
+            }
+
+            const scanResult = await dynamodb.send(new ScanCommand(scanParams));
+
+            if (scanResult.Items) {
+                for (const account of scanResult.Items) {
+                    const accessMap = account.Access as Record<string, string[]> | undefined;
+                    if (accessMap && accessMap[gamingSystemId]) {
+                        // Check if this shop item ID is in the array for this gaming system
+                        if (accessMap[gamingSystemId].includes(id)) {
+                            accountsWithAccess.push({
+                                ID: account.ID as string,
+                                Email: account.Email as string
+                            });
+                        }
+                    }
+                }
+            }
+
+            lastEvaluatedKey = scanResult.LastEvaluatedKey;
+        } while (lastEvaluatedKey);
+
+        // Check if any gaming system requires this shop item
+        const gamingSystemsRequiringItem: Array<{ ID: string; Name: string }> = [];
+        let gsLastEvaluatedKey: Record<string, any> | undefined = undefined;
+
+        do {
+            const gsScanParams: any = {
+                TableName: GAMING_SYSTEMS_TABLE_NAME,
+                ProjectionExpression: 'ID, #name, RequiredShopItem',
+                ExpressionAttributeNames: {
+                    '#name': 'Name'
+                },
+                FilterExpression: 'RequiredShopItem = :shopItemId',
+                ExpressionAttributeValues: {
+                    ':shopItemId': id
+                }
+            };
+
+            if (gsLastEvaluatedKey) {
+                gsScanParams.ExclusiveStartKey = gsLastEvaluatedKey;
+            }
+
+            const gsScanResult = await dynamodb.send(new ScanCommand(gsScanParams));
+
+            if (gsScanResult.Items) {
+                for (const system of gsScanResult.Items) {
+                    gamingSystemsRequiringItem.push({
+                        ID: system.ID as string,
+                        Name: system.Name as string
+                    });
+                }
+            }
+
+            gsLastEvaluatedKey = gsScanResult.LastEvaluatedKey;
+        } while (gsLastEvaluatedKey);
+
+        // If any accounts have access OR gaming systems require this item, return 409 Conflict
+        if (accountsWithAccess.length > 0 || gamingSystemsRequiringItem.length > 0) {
+            const errors: string[] = [];
+
+            if (gamingSystemsRequiringItem.length > 0) {
+                const systemNames = gamingSystemsRequiringItem.map(s => s.Name).join(', ');
+                errors.push(`This shop item is required by the following gaming system(s): ${systemNames}. Remove the RequiredShopItem setting from these gaming systems before deleting.`);
+            }
+
+            if (accountsWithAccess.length > 0) {
+                errors.push(`${accountsWithAccess.length} account(s) still have access to this shop item. Remove access from these accounts before deleting.`);
+            }
+
+            return response(409, {
+                error: 'Cannot delete product',
+                message: errors.join(' '),
+                accounts: accountsWithAccess,
+                gamingSystems: gamingSystemsRequiringItem
+            });
+        }
+
+        // No accounts have access and no gaming systems require it, proceed with deletion
+        const deleteParams: DeleteCommandInput = {
             TableName: TABLE_NAME,
             Key: { ID: id },
             ConditionExpression: 'attribute_exists(ID)',
             ReturnValues: 'ALL_OLD'
         };
 
-        const result = await dynamodb.send(new DeleteCommand(params));
+        const result = await dynamodb.send(new DeleteCommand(deleteParams));
 
         if (!result.Attributes) {
             return response(404, { error: 'Product not found' });
         }
+
+        // Delete the S3 folder for this product (don't fail if this errors)
+        const environment = (process.env.ENVIRONMENT || 'dev') as 'dev' | 'prod';
+        await deleteProductFolder(gamingSystemId, id, environment);
 
         return response(200, {
             message: 'Product deleted successfully',
