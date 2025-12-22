@@ -54,6 +54,7 @@ interface Product {
     Image?: string; // Image URL or key
     IsArchived: boolean;
     IsFeatured: boolean;
+    GrantToNewAccounts: boolean; // If true, automatically grant this item to new accounts
     CreatedAt: string; // ISO 8601 timestamp
     UpdatedAt: string; // ISO 8601 timestamp
     [key: string]: any; // Allow additional attributes
@@ -623,6 +624,7 @@ async function createProduct(productData: any): Promise<APIGatewayProxyResult> {
             Image: imagePath,
             IsArchived: productData.IsArchived ?? false,
             IsFeatured: productData.IsFeatured ?? false,
+            GrantToNewAccounts: productData.GrantToNewAccounts ?? false,
             CreatedAt: timestamp,
             UpdatedAt: timestamp
         };
