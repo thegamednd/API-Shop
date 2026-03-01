@@ -39,8 +39,10 @@ const CORS_HEADERS = {
 
 // Product interface - Updated for new Shop table structure
 interface ProductItem {
-    Type: 'Maps' | 'Classes' | 'Spells' | 'Races' | 'Modules' | 'Shop';
+    Type: 'Maps' | 'Classes' | 'Spells' | 'Races' | 'Modules' | 'Shop' | 'Skills' | 'Pantheons';
     ID?: string; // Required for Maps, Modules, and Shop, not needed for Classes/Spells/Races
+    IDs?: string[]; // Optional array of specific item IDs for granular selection
+    PrayerIDs?: string[]; // Optional array of specific prayer IDs (Pantheons type only)
 }
 
 interface Product {
@@ -517,6 +519,91 @@ async function getProductsByType(type: string, queryParams: Record<string, strin
     }
 }
 
+// UUID regex for validation
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Validate product items array - returns error object or null if valid
+function validateProductItems(items: any[]): any {
+    const validTypes = ['Maps', 'Classes', 'Spells', 'Races', 'Modules', 'Shop', 'Skills', 'Pantheons'];
+
+    for (const item of items) {
+        if (!item.Type || !validTypes.includes(item.Type)) {
+            return {
+                error: 'Invalid item Type',
+                message: `Type must be one of: ${validTypes.join(', ')}`,
+                invalidItem: item
+            };
+        }
+
+        // Maps, Modules, and Shop require ID
+        if ((item.Type === 'Maps' || item.Type === 'Modules' || item.Type === 'Shop') && !item.ID) {
+            return {
+                error: 'Missing ID for item',
+                message: `${item.Type} items require an ID`,
+                invalidItem: item
+            };
+        }
+
+        // Validate ID format (basic UUID check)
+        if (item.ID && !UUID_REGEX.test(item.ID)) {
+            return {
+                error: 'Invalid ID format',
+                message: 'ID must be a valid UUID',
+                invalidItem: item
+            };
+        }
+
+        // Validate IDs array if present
+        if (item.IDs !== undefined) {
+            if (!Array.isArray(item.IDs)) {
+                return {
+                    error: 'Invalid IDs format',
+                    message: 'IDs must be an array of UUIDs',
+                    invalidItem: item
+                };
+            }
+            for (const id of item.IDs) {
+                if (!UUID_REGEX.test(id)) {
+                    return {
+                        error: 'Invalid ID in IDs array',
+                        message: 'Each ID in IDs must be a valid UUID',
+                        invalidItem: item
+                    };
+                }
+            }
+        }
+
+        // Validate PrayerIDs if present (only valid on Pantheons type)
+        if (item.PrayerIDs !== undefined) {
+            if (item.Type !== 'Pantheons') {
+                return {
+                    error: 'Invalid field PrayerIDs',
+                    message: 'PrayerIDs is only valid on Pantheons type items',
+                    invalidItem: item
+                };
+            }
+            if (!Array.isArray(item.PrayerIDs)) {
+                return {
+                    error: 'Invalid PrayerIDs format',
+                    message: 'PrayerIDs must be an array of UUIDs',
+                    invalidItem: item
+                };
+            }
+            for (const id of item.PrayerIDs) {
+                if (!UUID_REGEX.test(id)) {
+                    return {
+                        error: 'Invalid ID in PrayerIDs array',
+                        message: 'Each ID in PrayerIDs must be a valid UUID',
+                        invalidItem: item
+                    };
+                }
+            }
+        }
+    }
+
+    return null; // Valid
+}
+
 // Create new product
 async function createProduct(productData: any): Promise<APIGatewayProxyResult> {
     try {
@@ -537,33 +624,9 @@ async function createProduct(productData: any): Promise<APIGatewayProxyResult> {
         }
 
         // Validate each item in Items array
-        const validTypes = ['Maps', 'Classes', 'Spells', 'Races', 'Modules', 'Shop'];
-        for (const item of productData.Items) {
-            if (!item.Type || !validTypes.includes(item.Type)) {
-                return response(400, {
-                    error: 'Invalid item Type',
-                    message: `Type must be one of: ${validTypes.join(', ')}`,
-                    invalidItem: item
-                });
-            }
-
-            // Maps, Modules, and Shop require ID
-            if ((item.Type === 'Maps' || item.Type === 'Modules' || item.Type === 'Shop') && !item.ID) {
-                return response(400, {
-                    error: 'Missing ID for item',
-                    message: `${item.Type} items require an ID`,
-                    invalidItem: item
-                });
-            }
-
-            // Validate ID format (basic UUID check)
-            if (item.ID && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(item.ID)) {
-                return response(400, {
-                    error: 'Invalid ID format',
-                    message: 'ID must be a valid UUID',
-                    invalidItem: item
-                });
-            }
+        const validationError = validateProductItems(productData.Items);
+        if (validationError) {
+            return response(400, validationError);
         }
 
         // Generate ID and ISO 8601 timestamp
@@ -710,6 +773,21 @@ async function updateProduct(id: string, updateData: Record<string, any>): Promi
             // Remove image-related fields if not updating image
             delete updateData.imageFilename;
             delete updateData.imageType;
+        }
+
+        // Validate Items array if provided in update
+        if (updateData.Items) {
+            if (!Array.isArray(updateData.Items) || updateData.Items.length === 0) {
+                return response(400, {
+                    error: 'Items must be a non-empty array',
+                    message: 'At least one item is required'
+                });
+            }
+
+            const validationError = validateProductItems(updateData.Items);
+            if (validationError) {
+                return response(400, validationError);
+            }
         }
 
         // Remove ID from update data if present
