@@ -49,7 +49,7 @@ interface Product {
     ID: string;
     Name: string;
     Items: ProductItem[]; // Array of items included in this product
-    Price: number; // Price in cents (CAD) - e.g., 20000 = $200.00 CAD
+    Price: number; // Price in cents (USD) - e.g., 20000 = $200.00 USD
     GamingSystemID: string;
     ShortDescription?: string; // Brief summary of the product
     Content?: string; // HTML/Markdown description
@@ -681,7 +681,7 @@ async function createProduct(productData: any): Promise<APIGatewayProxyResult> {
             Name: productData.Name,
             Items: productData.Items,
             GamingSystemID: productData.GamingSystemID,
-            Price: parseInt(productData.Price.toString()), // Price should be in cents (CAD)
+            Price: parseInt(productData.Price.toString()), // Price should be in cents (USD)
             ShortDescription: productData.ShortDescription || '',
             Content: productData.Content || '',
             Image: imagePath,
