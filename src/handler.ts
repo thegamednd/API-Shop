@@ -535,11 +535,20 @@ function validateProductItems(items: any[]): any {
             };
         }
 
-        // Maps, Modules, and Shop require ID
-        if ((item.Type === 'Maps' || item.Type === 'Modules' || item.Type === 'Shop') && !item.ID) {
+        // Maps and Shop require ID
+        if ((item.Type === 'Maps' || item.Type === 'Shop') && !item.ID) {
             return {
                 error: 'Missing ID for item',
                 message: `${item.Type} items require an ID`,
+                invalidItem: item
+            };
+        }
+
+        // Modules require either ID (single) or IDs (array)
+        if (item.Type === 'Modules' && !item.ID && (!item.IDs || item.IDs.length === 0)) {
+            return {
+                error: 'Missing ID or IDs for item',
+                message: 'Modules items require an ID or IDs array',
                 invalidItem: item
             };
         }
