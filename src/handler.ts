@@ -840,7 +840,7 @@ async function updateProduct(id: string, updateData: Record<string, any>): Promi
         const result = await dynamodb.send(new UpdateCommand(params));
 
         // Trigger async propagation to update affected realm configs
-        if (updateData.Items && result.Attributes?.GamingSystemID) {
+        if (result.Attributes?.GamingSystemID) {
             invokeShopProductUpdate({
                 productId: id,
                 gamingSystemId: result.Attributes.GamingSystemID as string
