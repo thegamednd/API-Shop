@@ -17,6 +17,7 @@ import {
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { checkAuthentication } from './services/authService.js';
 import { uploadProductImage, deleteProductFolder } from './services/imageUploadService.js';
+import { invokeShopProductUpdate } from './services/lambdaInvokeService.js';
 
 // Configure AWS SDK v3
 const client = new DynamoDBClient({
@@ -828,6 +829,14 @@ async function updateProduct(id: string, updateData: Record<string, any>): Promi
         };
 
         const result = await dynamodb.send(new UpdateCommand(params));
+
+        // Trigger async propagation to update affected realm configs
+        if (updateData.Items && result.Attributes?.GamingSystemID) {
+            invokeShopProductUpdate({
+                productId: id,
+                gamingSystemId: result.Attributes.GamingSystemID as string
+            }).catch(err => console.error('Failed to trigger propagation:', err));
+        }
 
         return response(200, result.Attributes);
     } catch (error: any) {
