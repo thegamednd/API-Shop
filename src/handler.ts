@@ -57,6 +57,7 @@ interface Product {
     Image?: string; // Image URL or key
     IsArchived: boolean;
     IsFeatured: boolean;
+    IsSystemProduct: boolean; // System-level products (e.g., RealmForge Essentials) — always granted to new accounts, required for realm creation
     GrantToNewAccounts: boolean; // If true, automatically grant this item to new accounts
     CreatedAt: string; // ISO 8601 timestamp
     UpdatedAt: string; // ISO 8601 timestamp
@@ -374,31 +375,27 @@ async function getProductsByGamingSystem(gamingSystemId: string, queryParams: Re
         let products = result.Items || [];
 
         // If request is from /realm/create and we're not already including archived,
-        // check if we need to add "RealmForge Essentials" for this gaming system
+        // ensure system products are included (they may be excluded by the IsArchived filter)
         if (isFromRealmCreate && !includeArchived) {
-            // Query for RealmForge Essentials (which may be archived)
-            const essentialsParams: QueryCommandInput = {
+            const systemParams: QueryCommandInput = {
                 TableName: TABLE_NAME,
                 IndexName: 'GamingSystemID-index',
                 KeyConditionExpression: 'GamingSystemID = :gamingSystemId',
-                FilterExpression: '#name = :essentialsName',
-                ExpressionAttributeNames: {
-                    '#name': 'Name'
-                },
+                FilterExpression: 'IsSystemProduct = :isSystem',
                 ExpressionAttributeValues: {
                     ':gamingSystemId': gamingSystemId,
-                    ':essentialsName': 'RealmForge Essentials'
+                    ':isSystem': true
                 }
             };
 
-            const essentialsResult = await dynamodb.send(new QueryCommand(essentialsParams));
+            const systemResult = await dynamodb.send(new QueryCommand(systemParams));
 
-            if (essentialsResult.Items && essentialsResult.Items.length > 0) {
-                const essentialsProduct = essentialsResult.Items[0];
-                // Add it if it's not already in the results
-                const alreadyIncluded = products.some((p: any) => p.ID === essentialsProduct.ID);
-                if (!alreadyIncluded) {
-                    products = [essentialsProduct, ...products];
+            if (systemResult.Items && systemResult.Items.length > 0) {
+                for (const systemProduct of systemResult.Items) {
+                    const alreadyIncluded = products.some((p: any) => p.ID === systemProduct.ID);
+                    if (!alreadyIncluded) {
+                        products = [systemProduct, ...products];
+                    }
                 }
             }
         }
@@ -435,6 +432,17 @@ async function getAllProducts(queryParams: Record<string, string | undefined>, i
         if (!includeArchived) {
             params.FilterExpression = 'IsArchived = :archived';
             params.ExpressionAttributeValues = { ':archived': false };
+        }
+
+        // For public routes, also exclude system products
+        if (!isAdminRoute) {
+            if (params.FilterExpression) {
+                params.FilterExpression += ' AND (attribute_not_exists(IsSystemProduct) OR IsSystemProduct = :notSystem)';
+            } else {
+                params.FilterExpression = '(attribute_not_exists(IsSystemProduct) OR IsSystemProduct = :notSystem)';
+            }
+            params.ExpressionAttributeValues = params.ExpressionAttributeValues || {};
+            params.ExpressionAttributeValues[':notSystem'] = false;
         }
 
         // Add Type filtering if provided
@@ -697,6 +705,7 @@ async function createProduct(productData: any): Promise<APIGatewayProxyResult> {
             Image: imagePath,
             IsArchived: productData.IsArchived ?? false,
             IsFeatured: productData.IsFeatured ?? false,
+            IsSystemProduct: productData.IsSystemProduct ?? false,
             GrantToNewAccounts: productData.GrantToNewAccounts ?? false,
             CreatedAt: timestamp,
             UpdatedAt: timestamp
@@ -859,12 +868,16 @@ async function getFeaturedProducts(queryParams: Record<string, string | undefine
             ':featured': true
         };
 
-        // Filter out archived products by default
+        // Filter out archived and system products by default
         const includeArchived = queryParams.includeArchived === 'true';
         if (!includeArchived) {
             params.FilterExpression += ' AND IsArchived = :archived';
             expressionAttributeValues[':archived'] = false;
         }
+
+        // Exclude system products from featured results
+        params.FilterExpression += ' AND (attribute_not_exists(IsSystemProduct) OR IsSystemProduct = :notSystem)';
+        expressionAttributeValues[':notSystem'] = false;
 
         params.ExpressionAttributeValues = expressionAttributeValues;
 
