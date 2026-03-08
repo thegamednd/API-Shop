@@ -17,6 +17,7 @@ import {
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { checkAuthentication } from './services/authService.js';
 import { uploadProductImage, deleteProductFolder } from './services/imageUploadService.js';
+import { invokeShopProductUpdate } from './services/lambdaInvokeService.js';
 
 // Configure AWS SDK v3
 const client = new DynamoDBClient({
@@ -39,21 +40,24 @@ const CORS_HEADERS = {
 
 // Product interface - Updated for new Shop table structure
 interface ProductItem {
-    Type: 'Maps' | 'Classes' | 'Spells' | 'Races' | 'Modules' | 'Shop';
+    Type: 'Maps' | 'Classes' | 'Spells' | 'Races' | 'Modules' | 'Shop' | 'Skills' | 'Pantheons';
     ID?: string; // Required for Maps, Modules, and Shop, not needed for Classes/Spells/Races
+    IDs?: string[]; // Optional array of specific item IDs for granular selection
+    PrayerIDs?: string[]; // Optional array of specific prayer IDs (Pantheons type only)
 }
 
 interface Product {
     ID: string;
     Name: string;
     Items: ProductItem[]; // Array of items included in this product
-    Price: number; // Price in cents (CAD) - e.g., 20000 = $200.00 CAD
+    Price: number; // Price in cents (USD) - e.g., 20000 = $200.00 USD
     GamingSystemID: string;
     ShortDescription?: string; // Brief summary of the product
     Content?: string; // HTML/Markdown description
     Image?: string; // Image URL or key
     IsArchived: boolean;
     IsFeatured: boolean;
+    IsSystemProduct: boolean; // System-level products (e.g., RealmForge Essentials) — always granted to new accounts, required for realm creation
     GrantToNewAccounts: boolean; // If true, automatically grant this item to new accounts
     CreatedAt: string; // ISO 8601 timestamp
     UpdatedAt: string; // ISO 8601 timestamp
@@ -371,31 +375,27 @@ async function getProductsByGamingSystem(gamingSystemId: string, queryParams: Re
         let products = result.Items || [];
 
         // If request is from /realm/create and we're not already including archived,
-        // check if we need to add "RealmForge Essentials" for this gaming system
+        // ensure system products are included (they may be excluded by the IsArchived filter)
         if (isFromRealmCreate && !includeArchived) {
-            // Query for RealmForge Essentials (which may be archived)
-            const essentialsParams: QueryCommandInput = {
+            const systemParams: QueryCommandInput = {
                 TableName: TABLE_NAME,
                 IndexName: 'GamingSystemID-index',
                 KeyConditionExpression: 'GamingSystemID = :gamingSystemId',
-                FilterExpression: '#name = :essentialsName',
-                ExpressionAttributeNames: {
-                    '#name': 'Name'
-                },
+                FilterExpression: 'IsSystemProduct = :isSystem',
                 ExpressionAttributeValues: {
                     ':gamingSystemId': gamingSystemId,
-                    ':essentialsName': 'RealmForge Essentials'
+                    ':isSystem': true
                 }
             };
 
-            const essentialsResult = await dynamodb.send(new QueryCommand(essentialsParams));
+            const systemResult = await dynamodb.send(new QueryCommand(systemParams));
 
-            if (essentialsResult.Items && essentialsResult.Items.length > 0) {
-                const essentialsProduct = essentialsResult.Items[0];
-                // Add it if it's not already in the results
-                const alreadyIncluded = products.some((p: any) => p.ID === essentialsProduct.ID);
-                if (!alreadyIncluded) {
-                    products = [essentialsProduct, ...products];
+            if (systemResult.Items && systemResult.Items.length > 0) {
+                for (const systemProduct of systemResult.Items) {
+                    const alreadyIncluded = products.some((p: any) => p.ID === systemProduct.ID);
+                    if (!alreadyIncluded) {
+                        products = [systemProduct, ...products];
+                    }
                 }
             }
         }
@@ -432,6 +432,17 @@ async function getAllProducts(queryParams: Record<string, string | undefined>, i
         if (!includeArchived) {
             params.FilterExpression = 'IsArchived = :archived';
             params.ExpressionAttributeValues = { ':archived': false };
+        }
+
+        // For public routes, also exclude system products
+        if (!isAdminRoute) {
+            if (params.FilterExpression) {
+                params.FilterExpression += ' AND (attribute_not_exists(IsSystemProduct) OR IsSystemProduct = :notSystem)';
+            } else {
+                params.FilterExpression = '(attribute_not_exists(IsSystemProduct) OR IsSystemProduct = :notSystem)';
+            }
+            params.ExpressionAttributeValues = params.ExpressionAttributeValues || {};
+            params.ExpressionAttributeValues[':notSystem'] = false;
         }
 
         // Add Type filtering if provided
@@ -517,6 +528,100 @@ async function getProductsByType(type: string, queryParams: Record<string, strin
     }
 }
 
+// UUID regex for validation
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Validate product items array - returns error object or null if valid
+function validateProductItems(items: any[]): any {
+    const validTypes = ['Maps', 'Classes', 'Spells', 'Races', 'Modules', 'Shop', 'Skills', 'Pantheons'];
+
+    for (const item of items) {
+        if (!item.Type || !validTypes.includes(item.Type)) {
+            return {
+                error: 'Invalid item Type',
+                message: `Type must be one of: ${validTypes.join(', ')}`,
+                invalidItem: item
+            };
+        }
+
+        // Shop requires ID
+        if (item.Type === 'Shop' && !item.ID) {
+            return {
+                error: 'Missing ID for item',
+                message: `${item.Type} items require an ID`,
+                invalidItem: item
+            };
+        }
+
+        // Maps and Modules require either ID (single) or IDs (array)
+        if ((item.Type === 'Maps' || item.Type === 'Modules') && !item.ID && (!item.IDs || item.IDs.length === 0)) {
+            return {
+                error: 'Missing ID or IDs for item',
+                message: `${item.Type} items require an ID or IDs array`,
+                invalidItem: item
+            };
+        }
+
+        // Validate ID format (basic UUID check)
+        if (item.ID && !UUID_REGEX.test(item.ID)) {
+            return {
+                error: 'Invalid ID format',
+                message: 'ID must be a valid UUID',
+                invalidItem: item
+            };
+        }
+
+        // Validate IDs array if present
+        if (item.IDs !== undefined) {
+            if (!Array.isArray(item.IDs)) {
+                return {
+                    error: 'Invalid IDs format',
+                    message: 'IDs must be an array of UUIDs',
+                    invalidItem: item
+                };
+            }
+            for (const id of item.IDs) {
+                if (!UUID_REGEX.test(id)) {
+                    return {
+                        error: 'Invalid ID in IDs array',
+                        message: 'Each ID in IDs must be a valid UUID',
+                        invalidItem: item
+                    };
+                }
+            }
+        }
+
+        // Validate PrayerIDs if present (only valid on Pantheons type)
+        if (item.PrayerIDs !== undefined) {
+            if (item.Type !== 'Pantheons') {
+                return {
+                    error: 'Invalid field PrayerIDs',
+                    message: 'PrayerIDs is only valid on Pantheons type items',
+                    invalidItem: item
+                };
+            }
+            if (!Array.isArray(item.PrayerIDs)) {
+                return {
+                    error: 'Invalid PrayerIDs format',
+                    message: 'PrayerIDs must be an array of UUIDs',
+                    invalidItem: item
+                };
+            }
+            for (const id of item.PrayerIDs) {
+                if (!UUID_REGEX.test(id)) {
+                    return {
+                        error: 'Invalid ID in PrayerIDs array',
+                        message: 'Each ID in PrayerIDs must be a valid UUID',
+                        invalidItem: item
+                    };
+                }
+            }
+        }
+    }
+
+    return null; // Valid
+}
+
 // Create new product
 async function createProduct(productData: any): Promise<APIGatewayProxyResult> {
     try {
@@ -537,33 +642,9 @@ async function createProduct(productData: any): Promise<APIGatewayProxyResult> {
         }
 
         // Validate each item in Items array
-        const validTypes = ['Maps', 'Classes', 'Spells', 'Races', 'Modules', 'Shop'];
-        for (const item of productData.Items) {
-            if (!item.Type || !validTypes.includes(item.Type)) {
-                return response(400, {
-                    error: 'Invalid item Type',
-                    message: `Type must be one of: ${validTypes.join(', ')}`,
-                    invalidItem: item
-                });
-            }
-
-            // Maps, Modules, and Shop require ID
-            if ((item.Type === 'Maps' || item.Type === 'Modules' || item.Type === 'Shop') && !item.ID) {
-                return response(400, {
-                    error: 'Missing ID for item',
-                    message: `${item.Type} items require an ID`,
-                    invalidItem: item
-                });
-            }
-
-            // Validate ID format (basic UUID check)
-            if (item.ID && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(item.ID)) {
-                return response(400, {
-                    error: 'Invalid ID format',
-                    message: 'ID must be a valid UUID',
-                    invalidItem: item
-                });
-            }
+        const validationError = validateProductItems(productData.Items);
+        if (validationError) {
+            return response(400, validationError);
         }
 
         // Generate ID and ISO 8601 timestamp
@@ -618,12 +699,13 @@ async function createProduct(productData: any): Promise<APIGatewayProxyResult> {
             Name: productData.Name,
             Items: productData.Items,
             GamingSystemID: productData.GamingSystemID,
-            Price: parseInt(productData.Price.toString()), // Price should be in cents (CAD)
+            Price: parseInt(productData.Price.toString()), // Price should be in cents (USD)
             ShortDescription: productData.ShortDescription || '',
             Content: productData.Content || '',
             Image: imagePath,
             IsArchived: productData.IsArchived ?? false,
             IsFeatured: productData.IsFeatured ?? false,
+            IsSystemProduct: productData.IsSystemProduct ?? false,
             GrantToNewAccounts: productData.GrantToNewAccounts ?? false,
             CreatedAt: timestamp,
             UpdatedAt: timestamp
@@ -712,6 +794,21 @@ async function updateProduct(id: string, updateData: Record<string, any>): Promi
             delete updateData.imageType;
         }
 
+        // Validate Items array if provided in update
+        if (updateData.Items) {
+            if (!Array.isArray(updateData.Items) || updateData.Items.length === 0) {
+                return response(400, {
+                    error: 'Items must be a non-empty array',
+                    message: 'At least one item is required'
+                });
+            }
+
+            const validationError = validateProductItems(updateData.Items);
+            if (validationError) {
+                return response(400, validationError);
+            }
+        }
+
         // Remove ID from update data if present
         delete updateData.ID;
         delete updateData.CreatedAt; // Prevent overwriting creation timestamp
@@ -742,6 +839,14 @@ async function updateProduct(id: string, updateData: Record<string, any>): Promi
 
         const result = await dynamodb.send(new UpdateCommand(params));
 
+        // Trigger async propagation to update affected realm configs
+        if (result.Attributes?.GamingSystemID) {
+            invokeShopProductUpdate({
+                productId: id,
+                gamingSystemId: result.Attributes.GamingSystemID as string
+            }).catch(err => console.error('Failed to trigger propagation:', err));
+        }
+
         return response(200, result.Attributes);
     } catch (error: any) {
         if (error.name === 'ConditionalCheckFailedException') {
@@ -763,12 +868,16 @@ async function getFeaturedProducts(queryParams: Record<string, string | undefine
             ':featured': true
         };
 
-        // Filter out archived products by default
+        // Filter out archived and system products by default
         const includeArchived = queryParams.includeArchived === 'true';
         if (!includeArchived) {
             params.FilterExpression += ' AND IsArchived = :archived';
             expressionAttributeValues[':archived'] = false;
         }
+
+        // Exclude system products from featured results
+        params.FilterExpression += ' AND (attribute_not_exists(IsSystemProduct) OR IsSystemProduct = :notSystem)';
+        expressionAttributeValues[':notSystem'] = false;
 
         params.ExpressionAttributeValues = expressionAttributeValues;
 
