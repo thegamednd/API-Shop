@@ -533,7 +533,7 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 
 // Validate product items array - returns error object or null if valid
 function validateProductItems(items: any[]): any {
-    const validTypes = ['Maps', 'Classes', 'Spells', 'Races', 'Modules', 'Shop', 'Skills', 'Pantheons'];
+    const validTypes = ['Maps', 'Classes', 'Spells', 'Races', 'Modules', 'Shop', 'Skills', 'Pantheons', 'Psionics'];
 
     for (const item of items) {
         if (!item.Type || !validTypes.includes(item.Type)) {
